@@ -10,11 +10,6 @@ namespace AnonSuggestionsBot {
     public class Database {
 
         private NpgsqlDataSource dataSource;
-        public enum serverInitializationReturn{
-            SUCCESS,
-            ALREADY_INITIALIZED,
-            ERROR
-        }
 
         public async void login(string IP, string password) {
             var connectionString = string.Format("Host={0};Username=postgres;Password={1};Database=postgres", IP, password);
@@ -68,8 +63,10 @@ namespace AnonSuggestionsBot {
             return "";
         }
 
-        public async void logSuggestion(ulong serverID, string userID_anonymised, string suggestionUID, string suggestion) {
-
+        public async void logSuggestion(ulong serverID, string user_hash, string suggestion_uid, string suggestion_title, string suggestion_text) {
+            string query = string.Format("insert into \"AnonSuggestionsBot\".submissions (server_id, user_hash, suggestion_uid, suggestion_time, suggestion_title, suggestion_text) values ({0}, '{1}', '{2}', '{3}', '{4}', '{5}');", serverID.ToString(), user_hash, suggestion_uid, DateTime.Now.ToString(), suggestion_title, suggestion_text);
+            await using var logSuggestion = dataSource.CreateCommand(query);
+            await using var logSuggestionReader = await logSuggestion.ExecuteReaderAsync();
         }
     }
 }

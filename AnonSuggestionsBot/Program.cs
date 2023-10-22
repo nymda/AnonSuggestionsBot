@@ -81,15 +81,15 @@ namespace AnonSuggestionsBot
             SocketGuild guild = _client.GetGuild((ulong)command.GuildId);
 
             if(command.Data.Options.Count() < 2) {
-                await command.RespondAsync("You must specify both an input and output channel");
+                await command.RespondAsync("You must specify both an input text channel and output text channel");
                 return;
             }
 
             SocketGuildChannel? inputChannel = guild.Channels.FirstOrDefault(c => c.Name == command.Data.Options.ToArray()[0].Value.ToString());
             SocketGuildChannel? outputChannel = guild.Channels.FirstOrDefault(c => c.Name == command.Data.Options.ToArray()[1].Value.ToString());
 
-            if (inputChannel == null || outputChannel == null) {
-                await command.RespondAsync("You must specify both an input and output channel");
+            if (inputChannel == null || inputChannel.GetChannelType() != ChannelType.Text || outputChannel == null || outputChannel.GetChannelType() != ChannelType.Text) {
+                await command.RespondAsync("You must specify both an input text channel and output text channel");
                 return;
             }
 
@@ -119,6 +119,10 @@ namespace AnonSuggestionsBot
             }
         }
 
+        public string createUid() {
+            return Guid.NewGuid().ToString();
+        }
+
         public async Task modalResponseHandler(SocketModal modal) {
             ulong? guildId = modal.GuildId;
             if(guildId == null) { return; }
@@ -132,13 +136,16 @@ namespace AnonSuggestionsBot
 
             if(outputChannel == null) { return; }
 
+            string suggestion_uid = createUid();
+            _db.logSuggestion((ulong)guildId, modal.User.Id.ToString(), suggestion_uid, title, body);
+
             var embed = new EmbedBuilder();
             embed.AddField(title, body);
-            embed.WithFooter("Suggestion ID: placeholder");
+            embed.WithFooter("Suggestion ID: " + suggestion_uid);
 
             await outputChannel.SendMessageAsync(embed: embed.Build());
-
-            await modal.RespondAsync();
+            RequestOptions rs = new RequestOptions();
+            await modal.RespondAsync("Suggestion sent!", ephemeral: true);
         }
     }
 }

@@ -68,5 +68,11 @@ namespace AnonSuggestionsBot {
             await using var logSuggestion = dataSource.CreateCommand(query);
             await using var logSuggestionReader = await logSuggestion.ExecuteReaderAsync();
         }
+
+        public async void createBanEntry(ulong serverID, string user_hash, int length_minutes, bool perma) {
+            string query = string.Format("insert into \"AnonSuggestionsBot\".bans (server_id, user_hash, ban_time, ban_duration, ban_perma) values ({0}, '{1}', '{2}', '{3}');", serverID.ToString(), user_hash, DateTime.Now.ToString(), length_minutes, perma);
+            await using var createBanEntry = dataSource.CreateCommand(query);
+            await using var createBanEntryReader = await createBanEntry.ExecuteReaderAsync();
+        }
     }
 }

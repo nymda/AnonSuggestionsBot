@@ -25,7 +25,7 @@ namespace AnonSuggestionsBot
         public async Task MainAsync() {
             Console.Write("Enter postgresql IP: ");
             string? IPAddy = Console.ReadLine();
-            Console.Write("\nEnter postgresql password: ");
+            Console.Write("Enter postgresql password: ");
             string? password = Console.ReadLine();
             Console.Clear();
 
@@ -79,6 +79,13 @@ namespace AnonSuggestionsBot
             if(command.CommandName == "initialize") {
                 await guildSetup(command);
             }
+            if(command.CommandName == "suggestion-ban") {
+                await banSuggestionCreator(command);
+            }
+        }
+
+        private Task banSuggestionCreator(SocketSlashCommand command) {
+            throw new NotImplementedException();
         }
 
         private async Task guildSetup(SocketSlashCommand command) {
@@ -103,7 +110,7 @@ namespace AnonSuggestionsBot
             var suggestionBan = new SlashCommandBuilder();
             suggestionBan.WithName("suggestion-ban");
             suggestionBan.WithDescription("Bans the creator of suggestion");
-            suggestionBan.AddOption("suggestion", ApplicationCommandOptionType.String, "the ID of the suggestion to ban the creator of");
+            suggestionBan.AddOption("ID", ApplicationCommandOptionType.String, "the ID of the suggestion to ban the creator of");
             await guild.CreateApplicationCommandAsync(suggestionBan.Build());
 
             var btnBuilder = new ComponentBuilder().WithButton("Suggest", "btn-send-suggestion");

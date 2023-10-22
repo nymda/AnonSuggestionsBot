@@ -15,7 +15,12 @@ namespace AnonSuggestionsBot
         private static DiscordSocketClient _client;
         private static IServiceProvider _services;
         private static Database _db = new Database();
+        System.Security.Cryptography.MD5 _md5 = System.Security.Cryptography.MD5.Create();
         public static Task Main(string[] args) => new Program().MainAsync();
+
+        public string stringToMD5(string input) {
+            return Convert.ToHexString(_md5.ComputeHash(System.Text.Encoding.ASCII.GetBytes(input)));
+        }
 
         public async Task MainAsync() {
             Console.Write("Enter postgresql IP: ");
@@ -137,7 +142,7 @@ namespace AnonSuggestionsBot
             if(outputChannel == null) { return; }
 
             string suggestion_uid = createUid();
-            _db.logSuggestion((ulong)guildId, modal.User.Id.ToString(), suggestion_uid, title, body);
+            _db.logSuggestion((ulong)guildId, stringToMD5(modal.User.Id.ToString()), suggestion_uid, title, body);
 
             var embed = new EmbedBuilder();
             embed.AddField(title, body);

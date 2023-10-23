@@ -1,4 +1,21 @@
-﻿using Discord;
+﻿/*
+ * This file is part of AnonSuggestionBot (https://github.com/nymda/AnonSuggestionsBot).
+ * Copyright (c) 2023 github/nymda
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, version 3.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+using Discord;
 using Discord.Commands;
 using Discord.Interactions;
 using Discord.Net;
@@ -86,7 +103,27 @@ namespace AnonSuggestionsBot
         }
 
         private async Task SlashCommandHandler(SocketSlashCommand command) {
-            if(command.CommandName == "initialize") {
+            if(command.GuildId == null) {
+                await command.RespondAsync("Commands cannot be run in DMs");
+                return;
+            }
+
+            SocketGuild guild = _client.GetGuild((ulong)command.GuildId);
+            bool userIsAdmin = guild.GetUser(command.User.Id).GuildPermissions.Administrator;
+            bool userIsModerator = guild.GetUser(command.User.Id).GuildPermissions.KickMembers; //this isnt a great method of testing for mod rights, but it works (?)
+
+            SocketRole? overrideRole = guild.Roles.Where(r => r.Name == "SuggestionPerms").FirstOrDefault();
+            bool userHasOverrideRole = false;
+            if (overrideRole != null) {
+                userHasOverrideRole = guild.GetUser(command.User.Id).Roles.Contains(overrideRole);
+            }
+
+            if (!(userIsAdmin || userIsModerator || userHasOverrideRole)) {
+                await command.RespondAsync("You do not have permission to run this command", ephemeral: true);
+                return;
+            }
+
+            if (command.CommandName == "initialize") {
                 await guildSetup(command);
             }
             if(command.CommandName == "suggestion-ban") {
@@ -99,6 +136,11 @@ namespace AnonSuggestionsBot
         }
         private async Task banSuggestionCreator(SocketSlashCommand command) {
             if(command.GuildId == null) { return; }
+
+            if(command.Data.Options.ToArray().Count() < 1) {
+                await command.RespondAsync("You must specify a suggestion UID");
+                return;
+            }   
 
             string? suggestion_uid = command.Data.Options.ToArray()[0].Value.ToString();
 
@@ -119,8 +161,8 @@ namespace AnonSuggestionsBot
             await command.RespondAsync("User has been banned from creating suggestions");
         }
 
-        private Task timeoutSuggestionCreator(SocketSlashCommand command) {
-            throw new NotImplementedException();
+        private async Task timeoutSuggestionCreator(SocketSlashCommand command) {
+            await command.RespondAsync("Timeouts are not implemented yet, sorry!");
         }
 
         private async Task guildSetup(SocketSlashCommand command) {

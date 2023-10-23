@@ -35,17 +35,18 @@ namespace AnonSuggestionsBot {
         }
 
         public async void createServerEntry(ulong discord_id, string inputChannel, string outputChannel) {
-            await using var getCurrentDiscordIdInitialized = dataSource.CreateCommand(string.Format("select count(server_id) from \"AnonSuggestionsBot\".servers where discord_id like '{0}';", discord_id));
+            await using var getCurrentDiscordIdInitialized = dataSource.CreateCommand(string.Format("select count(server_id) from \"AnonSuggestionsBot\".servers where discord_id like '{0}';", discord_id.ToString()));
             await using var getCurrentDiscordIdInitializedReader = await getCurrentDiscordIdInitialized.ExecuteReaderAsync();
 
             while (getCurrentDiscordIdInitializedReader.Read()) {
-                if (getCurrentDiscordIdInitializedReader.GetValue(0).ToString() != "0") {
-                    await using var deleteOldDiscordEntry = dataSource.CreateCommand(string.Format("delete from \"AnonSuggestionsBot\".servers where discord_id like '{0}';", discord_id));
+                if (getCurrentDiscordIdInitializedReader.GetInt32(0) > 0) {
+                    await using var deleteOldDiscordEntry = dataSource.CreateCommand(string.Format("update \"AnonSuggestionsBot\".servers set discord_submit_channel = '{0}', discord_post_channel = '{1}' where discord_id like '{2}';", inputChannel, outputChannel, discord_id.ToString()));
                     await deleteOldDiscordEntry.ExecuteReaderAsync();
                 }
-
-                await using var createCurrentDiscordEntry = dataSource.CreateCommand(string.Format("insert into \"AnonSuggestionsBot\".servers (discord_id, discord_submit_channel, discord_post_channel) values ({0}, '{1}', '{2}');", discord_id, inputChannel, outputChannel));
-                await createCurrentDiscordEntry.ExecuteReaderAsync();
+                else {
+                    await using var createCurrentDiscordEntry = dataSource.CreateCommand(string.Format("insert into \"AnonSuggestionsBot\".servers (discord_id, discord_submit_channel, discord_post_channel) values ({0}, '{1}', '{2}');", discord_id.ToString(), inputChannel, outputChannel));
+                    await createCurrentDiscordEntry.ExecuteReaderAsync();
+                }
             }
         }
 

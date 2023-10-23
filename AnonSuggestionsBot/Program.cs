@@ -26,6 +26,16 @@ using System;
 using System.Reflection;
 using System.Windows.Input;
 
+/*
+ * TODO:
+ * global server slowmode
+ * timeouts
+ * voting
+ * additional error handling
+ * shitload of QA testing
+ * DB / API optimizations
+ */
+
 namespace AnonSuggestionsBot
 {
     internal class Program {
@@ -187,14 +197,14 @@ namespace AnonSuggestionsBot
             var suggestionBan = new SlashCommandBuilder();
             suggestionBan.WithName("suggestion-ban");
             suggestionBan.WithDescription("Bans the creator of suggestion");
-            suggestionBan.AddOption("ID", ApplicationCommandOptionType.String, "the ID of the suggestion to ban the creator of");
+            suggestionBan.AddOption("id", ApplicationCommandOptionType.String, "the ID of the suggestion to ban the creator of");
             await guild.CreateApplicationCommandAsync(suggestionBan.Build());
 
             var suggestionTimeout = new SlashCommandBuilder();
             suggestionTimeout.WithName("suggestion-timeout");
             suggestionTimeout.WithDescription("Timeouts the creator of a suggestion");
-            suggestionTimeout.AddOption("ID", ApplicationCommandOptionType.String, "the ID of the suggestion to timeout the creator of");
-            suggestionTimeout.AddOption("Length", ApplicationCommandOptionType.Number, "timeout length in minutes");
+            suggestionTimeout.AddOption("id", ApplicationCommandOptionType.String, "the ID of the suggestion to timeout the creator of");
+            suggestionTimeout.AddOption("length", ApplicationCommandOptionType.Number, "timeout length in minutes");
             await guild.CreateApplicationCommandAsync(suggestionTimeout.Build());
 
             var btnBuilder = new ComponentBuilder().WithButton("Suggest", "btn-send-suggestion");

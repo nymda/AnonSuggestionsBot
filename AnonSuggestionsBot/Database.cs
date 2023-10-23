@@ -106,16 +106,34 @@ namespace AnonSuggestionsBot {
             return "";
         }
 
-        public async Task<bool> checkUserBanned(ulong serverID, string userHash) {
-            string query = string.Format("select count(user_hash) from \"AnonSuggestionsBot\".bans where server_id like '{0}' and user_hash like '{1}';", serverID.ToString(), userHash);
+        public async Task<int> checkUserBanned(ulong serverID, string userHash) {
+            string query = string.Format("select * from \"AnonSuggestionsBot\".bans where server_id like '{0}' and user_hash like '{1}';", serverID.ToString(), userHash);
             await using var checkUserBanned = dataSource.CreateCommand(query);
             await using var checkUserBannedReader = await checkUserBanned.ExecuteReaderAsync();
+
+            DateTime now = DateTime.Now;
+
+            int minutesUntilNextUnban = 0;
+            bool banned = false;
+
             while (checkUserBannedReader.Read()) {
-                if (checkUserBannedReader.GetInt32(0) > 0) {
-                    return true;
+                DateTime banTime = checkUserBannedReader.GetDateTime(3);
+                int banDuration = checkUserBannedReader.GetInt32(4);
+                bool banPerma = checkUserBannedReader.GetBoolean(5);
+
+                DateTime banTimePlusDuration = banTime.AddMinutes(banDuration);
+
+                int minutesToUnban = (int)Math.Round((banTimePlusDuration - now).TotalMinutes);
+
+                if (banPerma) { return -2; }
+                if (banTimePlusDuration > now && minutesToUnban > minutesUntilNextUnban) { 
+                    minutesUntilNextUnban = minutesToUnban;
+                    banned = true;
                 }
             }
-            return false;
+
+            if (banned) { return minutesUntilNextUnban; }
+            return -1;
         }
     }
 }

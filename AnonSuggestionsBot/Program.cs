@@ -23,13 +23,23 @@ namespace AnonSuggestionsBot
         }
 
         public async Task MainAsync() {
-            Console.Write("Enter postgresql IP: ");
-            string? IPAddy = Console.ReadLine();
-            Console.Write("Enter postgresql password: ");
-            string? password = Console.ReadLine();
-            Console.Clear();
+            bool login = false;
 
-            _db.login(IPAddy, password); //login to the local DB        
+            while (!login) {
+                Console.Write("Enter postgresql IP: ");
+                string? IPAddy = Console.ReadLine();
+                Console.Write("Enter postgresql password: ");
+                string? password = Console.ReadLine();
+                Console.Clear();
+
+                if(IPAddy == null || password == null) { continue; }
+
+                try {
+                    _db.login(IPAddy, password); //login to the local DB
+                    login = true;
+                }
+                catch { }
+            }
 
             string token = await _db.getBotToken();
 
@@ -82,9 +92,34 @@ namespace AnonSuggestionsBot
             if(command.CommandName == "suggestion-ban") {
                 await banSuggestionCreator(command);
             }
+            if(command.CommandName == "suggestion-timeout") {
+                await timeoutSuggestionCreator(command);
+            }
+
+        }
+        private async Task banSuggestionCreator(SocketSlashCommand command) {
+            if(command.GuildId == null) { return; }
+
+            string? suggestion_uid = command.Data.Options.ToArray()[0].Value.ToString();
+
+            if(suggestion_uid == null) {
+                await command.RespondAsync("Suggestion UID is required");
+                return;
+            }
+
+            string userHash = await _db.getUserHashFromSuggestionUID((ulong)command.GuildId, suggestion_uid);
+
+            if(userHash == "") {
+                await command.RespondAsync("Suggestion UID not found");
+                return;
+            }
+
+            _db.createBanEntry((ulong)command.GuildId, userHash, 0, true);
+
+            await command.RespondAsync("User has been banned from creating suggestions");
         }
 
-        private Task banSuggestionCreator(SocketSlashCommand command) {
+        private Task timeoutSuggestionCreator(SocketSlashCommand command) {
             throw new NotImplementedException();
         }
 
@@ -113,6 +148,13 @@ namespace AnonSuggestionsBot
             suggestionBan.AddOption("ID", ApplicationCommandOptionType.String, "the ID of the suggestion to ban the creator of");
             await guild.CreateApplicationCommandAsync(suggestionBan.Build());
 
+            var suggestionTimeout = new SlashCommandBuilder();
+            suggestionTimeout.WithName("suggestion-timeout");
+            suggestionTimeout.WithDescription("Timeouts the creator of a suggestion");
+            suggestionTimeout.AddOption("ID", ApplicationCommandOptionType.String, "the ID of the suggestion to timeout the creator of");
+            suggestionTimeout.AddOption("Length", ApplicationCommandOptionType.Number, "timeout length in minutes");
+            await guild.CreateApplicationCommandAsync(suggestionTimeout.Build());
+
             var btnBuilder = new ComponentBuilder().WithButton("Suggest", "btn-send-suggestion");
             await guild.GetTextChannel(inputChannel.Id).SendMessageAsync("Click here to submit a suggestion:", components: btnBuilder.Build());
 
@@ -124,9 +166,8 @@ namespace AnonSuggestionsBot
                 var mb = new ModalBuilder();
                 mb.WithTitle("AnonSuggestionBot");
                 mb.WithCustomId("suggestion-input");
-                mb.AddTextInput("Title:", "suggestion-input-title", TextInputStyle.Short);
-                mb.AddTextInput("Suggestion:", "suggestion-input-body", TextInputStyle.Paragraph);
-
+                mb.AddTextInput("Title:", "suggestion-input-title", TextInputStyle.Short, minLength: 1, maxLength: 100, required: true);
+                mb.AddTextInput("Suggestion:", "suggestion-input-body", TextInputStyle.Paragraph, minLength: 1, maxLength: 2000, required: true);
                 await component.RespondWithModalAsync(mb.Build());
             }
         }
@@ -147,6 +188,12 @@ namespace AnonSuggestionsBot
             SocketTextChannel? outputChannel = guild.GetTextChannel(outputChannelId);
 
             if(outputChannel == null) { return; }
+
+            bool userBanned = await _db.checkUserBanned((ulong)guildId, stringToMD5(modal.User.Id.ToString()));
+            if(userBanned) {
+                await modal.RespondAsync("You are banned from creating suggestions", ephemeral: true);
+                return;
+            }
 
             string suggestion_uid = createUid();
             _db.logSuggestion((ulong)guildId, stringToMD5(modal.User.Id.ToString()), suggestion_uid, title, body);

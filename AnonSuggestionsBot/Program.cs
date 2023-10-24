@@ -113,6 +113,7 @@ namespace AnonSuggestionsBot
             initializeCmd.WithDescription("initializes AnonSuggestionsBot for this server");
             initializeCmd.AddOption("input", ApplicationCommandOptionType.Channel, "the channel to post the create suggestions message in");
             initializeCmd.AddOption("output", ApplicationCommandOptionType.Channel, "the channel to send anonymous suggestions to");
+            initializeCmd.AddOption("logging", ApplicationCommandOptionType.Channel, "(optional) the channel to send logs to when a user is banned");
             await _client.CreateGlobalApplicationCommandAsync(initializeCmd.Build());
         }
 
@@ -125,13 +126,11 @@ namespace AnonSuggestionsBot
 
             SocketGuild guild = _client.GetGuild((ulong)command.GuildId);
             bool userIsAdmin = guild.GetUser(command.User.Id).GuildPermissions.Administrator;
-            bool userIsModerator = guild.GetUser(command.User.Id).GuildPermissions.KickMembers; //this isnt a great method of testing for mod rights, but it works (?)
+            bool userIsModerator = guild.GetUser(command.User.Id).GuildPermissions.ModerateMembers;
 
             SocketRole? overrideRole = guild.Roles.Where(r => r.Name == "SuggestionPerms").FirstOrDefault();
             bool userHasOverrideRole = false;
-            if (overrideRole != null) {
-                userHasOverrideRole = guild.GetUser(command.User.Id).Roles.Contains(overrideRole);
-            }
+            if (overrideRole != null) { userHasOverrideRole = guild.GetUser(command.User.Id).Roles.Contains(overrideRole); }
 
             if (!(userIsAdmin || userIsModerator || userHasOverrideRole)) {
                 await command.RespondAsync("You do not have permission to run this command", ephemeral: true);
@@ -147,37 +146,10 @@ namespace AnonSuggestionsBot
             if(command.CommandName == "suggestion-timeout") {
                 await timeoutSuggestionCreator(command);
             }
-
-        }
-
-        //bans a user from creating suggestions, takes a suggestion UID as input
-        private async Task banSuggestionCreator(SocketSlashCommand command) {
-            if(command.GuildId == null) { return; }
-
-            if(command.Data.Options.ToArray().Count() < 1) {
-                await command.RespondAsync("Suggestion UID is required");
-                return;
-            }   
-
-            string? suggestion_uid = command.Data.Options.ToArray()[0].Value.ToString();
-
-            if(suggestion_uid == null) {
-                await command.RespondAsync("Suggestion UID is required");
-                return;
+            if (command.CommandName == "suggestion-lookup") {
+                await lookupSuggestionCreatorBans(command);
             }
 
-            //gets the hashed UID of the user who created the suggestion
-            string userHash = await _db.getUserHashFromSuggestionUID((ulong)command.GuildId, suggestion_uid);
-
-            if(userHash == "") {
-                await command.RespondAsync("Suggestion UID not found");
-                return;
-            }
-
-            //creates a ban entry using the retrieved user hash
-            _db.createBanEntry((ulong)command.GuildId, userHash, 0, true);
-
-            await command.RespondAsync("User has been banned from creating suggestions");
         }
 
         public string timeString(int minutes, bool full) {
@@ -197,18 +169,75 @@ namespace AnonSuggestionsBot
             }
         }
 
+        private async Task banSuggestionCreator(SocketSlashCommand command) {
+            if(command.GuildId == null) { return; }
+            SocketGuild guild = _client.GetGuild((ulong)command.GuildId);
+
+            SocketSlashCommandDataOption? suggestion_uid_option = command.Data.Options.ToArray().Where(x => x.Name == "id").FirstOrDefault();
+
+            if (suggestion_uid_option == null) {
+                await command.RespondAsync("Suggestion UID is required");
+                return;
+            }
+
+            string? suggestion_uid = suggestion_uid_option.Value.ToString();
+
+            //gets the hashed UID of the user who created the suggestion
+            string userHash = await _db.getUserHashFromSuggestionUID((ulong)command.GuildId, suggestion_uid);
+
+            if(userHash == "") {
+                await command.RespondAsync("Suggestion UID not found");
+                return;
+            }
+
+            //creates a ban entry using the retrieved user hash
+            _db.createBanEntry((ulong)command.GuildId, userHash, 0, true);
+
+            //log the ban in the logging channel if one is selected
+            ulong loggingChannelId = await _db.getServerLoggingChannel((ulong)command.GuildId);
+            string[] bannedSuggestion = await _db.getSuggestionFromUid((ulong)command.GuildId, suggestion_uid);
+
+            if (loggingChannelId != 0) {
+                SocketTextChannel? loggingChannel = guild.GetTextChannel(loggingChannelId);
+                if (loggingChannel != null) {
+                    string title = string.Format("@{0} has banned a user from creating suggestions", command.User.Username);
+                    string body = string.Format("Suggestion UID: {0}\n Suggestion time: {1}, \nBan length: Permenant", suggestion_uid, bannedSuggestion[0]);
+                    var embedNotification = new EmbedBuilder();
+                    embedNotification.AddField(title, body);
+
+                    var embedBannedSuggestion = new EmbedBuilder();
+                    embedBannedSuggestion.AddField(bannedSuggestion[1], bannedSuggestion[2]);
+                    embedBannedSuggestion.WithColor(100, 31, 34);
+
+                    Embed[] embedPackage = {embedNotification.Build(), embedBannedSuggestion.Build() }; 
+
+                    await loggingChannel.SendMessageAsync(embeds: embedPackage);
+                }
+            }
+
+            await command.RespondAsync("User has been banned from creating suggestions");
+        }
+
         private async Task timeoutSuggestionCreator(SocketSlashCommand command) {
             if (command.GuildId == null) { return; }
+            SocketGuild guild = _client.GetGuild((ulong)command.GuildId);
 
             if (command.Data.Options.ToArray().Count() < 2) {
                 await command.RespondAsync("Suggestion UID and ban length are required");
                 return;
             }
 
-            string? suggestion_uid = command.Data.Options.ToArray()[0].Value.ToString();
-            double? ban_length = (double)command.Data.Options.ToArray()[1].Value;
+            SocketSlashCommandDataOption? suggestion_uid_option = command.Data.Options.ToArray().Where(x => x.Name == "id").FirstOrDefault();
+            SocketSlashCommandDataOption? ban_length_option = command.Data.Options.ToArray().Where(x => x.Name == "length").FirstOrDefault();
 
-            if (suggestion_uid == null || ban_length == null) {
+            if (suggestion_uid_option == null || ban_length_option == null) {
+                await command.RespondAsync("Suggestion UID and ban length are required");
+                return;
+            }
+
+            string? suggestion_uid = suggestion_uid_option.Value.ToString();
+
+            if (suggestion_uid == null) {
                 await command.RespondAsync("Suggestion UID and ban length are required");
                 return;
             }
@@ -222,9 +251,64 @@ namespace AnonSuggestionsBot
             }
 
             //creates a ban entry using the retrieved user hash, but its temporary
-            _db.createBanEntry((ulong)command.GuildId, userHash, Convert.ToInt32((double)ban_length), false);
+            _db.createBanEntry((ulong)command.GuildId, userHash, Convert.ToInt32((double)ban_length_option.Value), false);
 
-            await command.RespondAsync(string.Format("User has been banned from creating suggestions for {0}", timeString((int)ban_length, true)));
+            //log the ban in the logging channel if one is selected
+            ulong loggingChannelId = await _db.getServerLoggingChannel((ulong)command.GuildId);
+            string[] bannedSuggestion = await _db.getSuggestionFromUid((ulong)command.GuildId, suggestion_uid);
+
+            if (loggingChannelId != 0) {
+                SocketTextChannel? loggingChannel = guild.GetTextChannel(loggingChannelId);
+                if (loggingChannel != null) {
+                    string title = string.Format("@{0} has banned a user from creating suggestions", command.User.Username);
+                    string body = string.Format("Suggestion UID: {0}\n Suggestion time: {1}, \nBan length: {2}", suggestion_uid, bannedSuggestion[0], timeString(Convert.ToInt32((double)ban_length_option.Value), true));
+
+                    var embedNotification = new EmbedBuilder();
+                    embedNotification.AddField(title, body);
+
+                    var embedBannedSuggestion = new EmbedBuilder();
+                    embedBannedSuggestion.AddField(bannedSuggestion[1], bannedSuggestion[2]);
+                    embedBannedSuggestion.WithColor(100, 31, 34);
+
+                    Embed[] embedPackage = { embedNotification.Build(), embedBannedSuggestion.Build() };
+
+                    await loggingChannel.SendMessageAsync(embeds: embedPackage);
+                }
+            }
+
+            await command.RespondAsync(string.Format("User has been banned from creating suggestions for {0}", timeString(Convert.ToInt32((double)ban_length_option.Value), true)));
+        }
+
+        private async Task lookupSuggestionCreatorBans(SocketSlashCommand command) {
+            if (command.GuildId == null) { return; }
+            SocketGuild guild = _client.GetGuild((ulong)command.GuildId);
+
+            SocketSlashCommandDataOption? suggestion_uid_option = command.Data.Options.ToArray().Where(x => x.Name == "id").FirstOrDefault();
+
+            if (suggestion_uid_option == null) {
+                await command.RespondAsync("Suggestion UID is required");
+                return;
+            }
+
+            string? suggestion_uid = suggestion_uid_option.Value.ToString();
+
+            if (suggestion_uid == null) {
+                await command.RespondAsync("Suggestion UID is required");
+                return;
+            }
+
+            //gets the hashed UID of the user who created the suggestion
+            string userHash = await _db.getUserHashFromSuggestionUID((ulong)command.GuildId, suggestion_uid);
+
+            if (userHash == "") {
+                await command.RespondAsync("Suggestion UID not found");
+                return;
+            }
+
+            //creates a ban entry using the retrieved user hash
+            int userBans = await _db.getUserPreviousBans((ulong)command.GuildId, userHash);
+
+            await command.RespondAsync(string.Format("The creator of `{0}` has been previously banned `{1}` time{2}", suggestion_uid, userBans, userBans == 1 ? "" : "s"));
         }
 
         private async Task guildSetup(SocketSlashCommand command) {
@@ -237,16 +321,41 @@ namespace AnonSuggestionsBot
             }
 
             //takes the input and output channel for the bot to use
-            SocketGuildChannel? inputChannel = guild.Channels.FirstOrDefault(c => c.Name == command.Data.Options.ToArray()[0].Value.ToString());
-            SocketGuildChannel? outputChannel = guild.Channels.FirstOrDefault(c => c.Name == command.Data.Options.ToArray()[1].Value.ToString());
 
-            if (inputChannel == null || inputChannel.GetChannelType() != ChannelType.Text || outputChannel == null || outputChannel.GetChannelType() != ChannelType.Text) {
+            SocketSlashCommandDataOption? inputChannel_option = command.Data.Options.ToArray().Where(x => x.Name == "input").FirstOrDefault();
+            SocketSlashCommandDataOption? outputChannel_option = command.Data.Options.ToArray().Where(x => x.Name == "output").FirstOrDefault();
+            SocketSlashCommandDataOption? loggingChannel_option = command.Data.Options.ToArray().Where(x => x.Name == "logging").FirstOrDefault();
+
+            if (inputChannel_option == null || outputChannel_option == null) {
+                await command.RespondAsync("You must specify both an input text channel and output text channel");
+                return;
+            }
+
+            SocketGuildChannel? inputChannel = guild.Channels.FirstOrDefault(c => c.Name == inputChannel_option.Value.ToString());
+            SocketGuildChannel? outputChannel = guild.Channels.FirstOrDefault(c => c.Name == outputChannel_option.Value.ToString());
+            SocketGuildChannel? loggingChannel = null;
+
+            if(loggingChannel_option != null) { 
+                loggingChannel = guild.Channels.FirstOrDefault(c => c.Name == loggingChannel_option.Value.ToString()); 
+                if(loggingChannel.GetChannelType() != ChannelType.Text) {
+                    await command.RespondAsync("Logging channel must be a text channel");
+                    return;
+                }
+            }
+
+            if (inputChannel == null || outputChannel == null || inputChannel.GetChannelType() != ChannelType.Text || outputChannel.GetChannelType() != ChannelType.Text) {
                 await command.RespondAsync("You must specify both an input text channel and output text channel");
                 return;
             }
 
             //entry for the server that /initialize was run on
-            _db.createServerEntry((ulong)command.GuildId, inputChannel.Id.ToString(), outputChannel.Id.ToString());
+
+            if (loggingChannel != null) {
+                _db.createServerEntry((ulong)command.GuildId, inputChannel.Id.ToString(), outputChannel.Id.ToString(), loggingChannel.Id.ToString());
+            }
+            else {
+                _db.createServerEntry((ulong)command.GuildId, inputChannel.Id.ToString(), outputChannel.Id.ToString());
+            }
 
             //creates guild specific commands suggestion-ban and suggestion-timeout
             var suggestionBan = new SlashCommandBuilder();
@@ -261,6 +370,12 @@ namespace AnonSuggestionsBot
             suggestionTimeout.AddOption("id", ApplicationCommandOptionType.String, "the ID of the suggestion to timeout the creator of");
             suggestionTimeout.AddOption("length", ApplicationCommandOptionType.Number, "timeout length in minutes");
             await guild.CreateApplicationCommandAsync(suggestionTimeout.Build());
+
+            var suggestionLookup = new SlashCommandBuilder();
+            suggestionLookup.WithName("suggestion-lookup");
+            suggestionLookup.WithDescription("Returns the number of previous bans the creator of a suggestion has");
+            suggestionLookup.AddOption("id", ApplicationCommandOptionType.String, "the ID of the suggestion to timeout the creator of");
+            await guild.CreateApplicationCommandAsync(suggestionLookup.Build());
 
             //posts the "create suggestion" message with the button to the input channel
             var btnBuilder = new ComponentBuilder().WithButton("Suggest", "btn-send-suggestion");
@@ -294,7 +409,7 @@ namespace AnonSuggestionsBot
             string body = modal.Data.Components.First(x => x.CustomId == "suggestion-input-body").Value;
 
             //gets the output channel for the current server
-            ulong outputChannelId = await _db.lookupServerOutputChannel((ulong)guildId);
+            ulong outputChannelId = await _db.getServerOutputChannel((ulong)guildId);
             SocketTextChannel? outputChannel = guild.GetTextChannel(outputChannelId);
             if (outputChannel == null) { return; }
 

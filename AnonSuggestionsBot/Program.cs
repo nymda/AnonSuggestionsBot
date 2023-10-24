@@ -103,6 +103,11 @@ namespace AnonSuggestionsBot
             Console.WriteLine(log);
         }
 
+        private bool checkGuildId(ulong? current, ulong? guildId) {
+            if(current == guildId) { return true; }
+            else { return false; }
+        }
+
         //first setup, creates the global /initialize command
         private async Task ReadyAsync() {
             _client.SlashCommandExecuted += SlashCommandHandler;
@@ -149,6 +154,9 @@ namespace AnonSuggestionsBot
             if (command.CommandName == "suggestion-lookup") {
                 await lookupSuggestionCreatorBans(command);
             }
+            if (command.CommandName == "suggestion-unban") {
+                await unbanSuggestionCreator(command);
+            }
 
         }
 
@@ -181,6 +189,11 @@ namespace AnonSuggestionsBot
             }
 
             string? suggestion_uid = suggestion_uid_option.Value.ToString();
+
+            if (suggestion_uid == null) {
+                await command.RespondAsync("Suggestion UID and ban length are required");
+                return;
+            }
 
             //gets the hashed UID of the user who created the suggestion
             string userHash = await _db.getUserHashFromSuggestionUID((ulong)command.GuildId, suggestion_uid);
@@ -311,6 +324,37 @@ namespace AnonSuggestionsBot
             await command.RespondAsync(string.Format("The creator of `{0}` has been previously banned `{1}` time{2}", suggestion_uid, userBans, userBans == 1 ? "" : "s"));
         }
 
+        private async Task unbanSuggestionCreator(SocketSlashCommand command) {
+            if (command.GuildId == null) { return; }
+            SocketGuild guild = _client.GetGuild((ulong)command.GuildId);
+
+            SocketSlashCommandDataOption? suggestion_uid_option = command.Data.Options.ToArray().Where(x => x.Name == "id").FirstOrDefault();
+
+            if (suggestion_uid_option == null) {
+                await command.RespondAsync("Suggestion UID is required");
+                return;
+            }
+
+            string? suggestion_uid = suggestion_uid_option.Value.ToString();
+
+            if (suggestion_uid == null) {
+                await command.RespondAsync("Suggestion UID is required");
+                return;
+            }
+
+            //gets the hashed UID of the user who created the suggestion
+            string userHash = await _db.getUserHashFromSuggestionUID((ulong)command.GuildId, suggestion_uid);
+
+            if (userHash == "") {
+                await command.RespondAsync("Suggestion UID not found");
+                return;
+            }
+            
+            await _db.unbanUser((ulong)command.GuildId, userHash);
+
+            await command.RespondAsync(string.Format("Bans removed for the creator of `{0}`", suggestion_uid));
+        }
+
         private async Task guildSetup(SocketSlashCommand command) {
             if(command.GuildId == null) { return; }
             SocketGuild guild = _client.GetGuild((ulong)command.GuildId);
@@ -361,21 +405,27 @@ namespace AnonSuggestionsBot
             var suggestionBan = new SlashCommandBuilder();
             suggestionBan.WithName("suggestion-ban");
             suggestionBan.WithDescription("Bans the creator of suggestion");
-            suggestionBan.AddOption("id", ApplicationCommandOptionType.String, "the ID of the suggestion to ban the creator of");
+            suggestionBan.AddOption("id", ApplicationCommandOptionType.String, "the ID of the suggestion");
             await guild.CreateApplicationCommandAsync(suggestionBan.Build());
 
             var suggestionTimeout = new SlashCommandBuilder();
             suggestionTimeout.WithName("suggestion-timeout");
             suggestionTimeout.WithDescription("Timeouts the creator of a suggestion");
-            suggestionTimeout.AddOption("id", ApplicationCommandOptionType.String, "the ID of the suggestion to timeout the creator of");
+            suggestionTimeout.AddOption("id", ApplicationCommandOptionType.String, "the UID of the suggestion");
             suggestionTimeout.AddOption("length", ApplicationCommandOptionType.Number, "timeout length in minutes");
             await guild.CreateApplicationCommandAsync(suggestionTimeout.Build());
 
             var suggestionLookup = new SlashCommandBuilder();
             suggestionLookup.WithName("suggestion-lookup");
             suggestionLookup.WithDescription("Returns the number of previous bans the creator of a suggestion has");
-            suggestionLookup.AddOption("id", ApplicationCommandOptionType.String, "the ID of the suggestion to timeout the creator of");
+            suggestionLookup.AddOption("id", ApplicationCommandOptionType.String, "the UID of the suggestion");
             await guild.CreateApplicationCommandAsync(suggestionLookup.Build());
+
+            var suggestionUnban = new SlashCommandBuilder();
+            suggestionUnban.WithName("suggestion-unban");
+            suggestionUnban.WithDescription("Unbans the creator of a suggestion");
+            suggestionUnban.AddOption("id", ApplicationCommandOptionType.String, "the UID of the suggestion");
+            await guild.CreateApplicationCommandAsync(suggestionUnban.Build());
 
             //posts the "create suggestion" message with the button to the input channel
             var btnBuilder = new ComponentBuilder().WithButton("Suggest", "btn-send-suggestion");

@@ -34,17 +34,17 @@ namespace AnonSuggestionsBot {
             dataSource = NpgsqlDataSource.Create(connectionString);
         }
 
-        public async void createServerEntry(ulong discord_id, string inputChannel, string outputChannel, string? loggingChannel = null) {
-            await using var getCurrentDiscordIdInitialized = dataSource.CreateCommand(string.Format("select count(server_id) from \"AnonSuggestionsBot\".servers where discord_id like '{0}';", discord_id.ToString()));
+        public async void createServerEntry(ulong serverID, string inputChannel, string outputChannel, string? loggingChannel = null) {
+            await using var getCurrentDiscordIdInitialized = dataSource.CreateCommand(string.Format("select count(server_id) from \"AnonSuggestionsBot\".servers where discord_id like '{0}';", serverID.ToString()));
             await using var getCurrentDiscordIdInitializedReader = await getCurrentDiscordIdInitialized.ExecuteReaderAsync();
 
             string update = "";
-            if(loggingChannel != null) { update = string.Format("update \"AnonSuggestionsBot\".servers set discord_submit_channel = '{0}', discord_post_channel = '{1}', discord_log_channel = '{2}' where discord_id like '{3}';", inputChannel, outputChannel, loggingChannel, discord_id.ToString()); }
-            else { update = string.Format("update \"AnonSuggestionsBot\".servers set discord_submit_channel = '{0}', discord_post_channel = '{1}', discord_log_channel = NULL where discord_id like '{2}';", inputChannel, outputChannel, discord_id.ToString()); }
+            if(loggingChannel != null) { update = string.Format("update \"AnonSuggestionsBot\".servers set discord_submit_channel = '{0}', discord_post_channel = '{1}', discord_log_channel = '{2}' where discord_id like '{3}';", inputChannel, outputChannel, loggingChannel, serverID.ToString()); }
+            else { update = string.Format("update \"AnonSuggestionsBot\".servers set discord_submit_channel = '{0}', discord_post_channel = '{1}', discord_log_channel = NULL where discord_id like '{2}';", inputChannel, outputChannel, serverID.ToString()); }
 
             string create = "";
-            if (loggingChannel != null) { create = string.Format("insert into \"AnonSuggestionsBot\".servers (discord_id, discord_submit_channel, discord_post_channel, discord_log_channel) values ({0}, '{1}', '{2}', '{3}');", discord_id.ToString(), inputChannel, outputChannel, loggingChannel); }
-            else { create = string.Format("insert into \"AnonSuggestionsBot\".servers (discord_id, discord_submit_channel, discord_post_channel) values ({0}, '{1}', '{2}');", discord_id.ToString(), inputChannel, outputChannel); }
+            if (loggingChannel != null) { create = string.Format("insert into \"AnonSuggestionsBot\".servers (discord_id, discord_submit_channel, discord_post_channel, discord_log_channel) values ({0}, '{1}', '{2}', '{3}');", serverID.ToString(), inputChannel, outputChannel, loggingChannel); }
+            else { create = string.Format("insert into \"AnonSuggestionsBot\".servers (discord_id, discord_submit_channel, discord_post_channel) values ({0}, '{1}', '{2}');", serverID.ToString(), inputChannel, outputChannel); }
 
             while (getCurrentDiscordIdInitializedReader.Read()) {
                 if (getCurrentDiscordIdInitializedReader.GetInt32(0) > 0) {
@@ -58,8 +58,14 @@ namespace AnonSuggestionsBot {
             }
         }
 
-        public async Task<ulong> getServerOutputChannel(ulong discord_id) {
-            await using var getOutputChannel = dataSource.CreateCommand(string.Format("select discord_post_channel from \"AnonSuggestionsBot\".servers where discord_id like '{0}';", discord_id));
+        public async Task updateBans(ulong serverID) {
+            string query = string.Format("update \"AnonSuggestionsBot\".bans set ban_expired = true where server_id like '{0}' and not (ban_time + (ban_duration * interval '1 minute')) >= now();", serverID.ToString());
+            await using var updateBans = dataSource.CreateCommand(query);
+            await updateBans.ExecuteReaderAsync();
+        }
+
+        public async Task<ulong> getServerOutputChannel(ulong serverID) {
+            await using var getOutputChannel = dataSource.CreateCommand(string.Format("select discord_post_channel from \"AnonSuggestionsBot\".servers where discord_id like '{0}';", serverID));
             await using var getOutputChannelReader = await getOutputChannel.ExecuteReaderAsync();
 
             while (getOutputChannelReader.Read()) {
@@ -70,8 +76,8 @@ namespace AnonSuggestionsBot {
             return 0;
         }
 
-        public async Task<ulong> getServerLoggingChannel(ulong discord_id) {
-            await using var getOutputChannel = dataSource.CreateCommand(string.Format("select discord_log_channel from \"AnonSuggestionsBot\".servers where discord_id like '{0}';", discord_id));
+        public async Task<ulong> getServerLoggingChannel(ulong serverID) {
+            await using var getOutputChannel = dataSource.CreateCommand(string.Format("select discord_log_channel from \"AnonSuggestionsBot\".servers where discord_id like '{0}';", serverID));
             await using var getOutputChannelReader = await getOutputChannel.ExecuteReaderAsync();
 
             while (getOutputChannelReader.Read()) {
@@ -130,7 +136,9 @@ namespace AnonSuggestionsBot {
         }
 
         public async Task<int> checkUserBanned(ulong serverID, string userHash) {
-            string query = string.Format("select * from \"AnonSuggestionsBot\".bans where server_id like '{0}' and user_hash like '{1}';", serverID.ToString(), userHash);
+            await updateBans(serverID);
+
+            string query = string.Format("select * from \"AnonSuggestionsBot\".bans where server_id like '{0}' and user_hash like '{1}' and (ban_expired != true);", serverID.ToString(), userHash);
             await using var checkUserBanned = dataSource.CreateCommand(query);
             await using var checkUserBannedReader = await checkUserBanned.ExecuteReaderAsync();
 
@@ -186,6 +194,12 @@ namespace AnonSuggestionsBot {
             }
 
             return -1;
+        }
+
+        public async Task unbanUser(ulong serverID, string userHash) {
+            string query = string.Format("update \"AnonSuggestionsBot\".bans set ban_expired = true where server_id like '{0}' and user_hash like '{1}';", serverID.ToString(), userHash);
+            await using var unbanUser = dataSource.CreateCommand(query);
+            await unbanUser.ExecuteReaderAsync();
         }
     }
 }

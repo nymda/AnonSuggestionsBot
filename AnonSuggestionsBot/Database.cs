@@ -220,5 +220,18 @@ namespace AnonSuggestionsBot {
 
             return new DateTime(0);
         }
+
+        public async Task<int> getServerSlowMode(ulong serverID) {
+            string query = string.Format("select discord_slowmode from \"AnonSuggestionsBot\".servers where discord_id like '{0}';", serverID.ToString());
+            await using var getServerSlowMode = dataSource.CreateCommand(query);
+            await using var getServerSlowModeReader = await getServerSlowMode.ExecuteReaderAsync();
+            
+            while (getServerSlowModeReader.Read()) {
+                if (getServerSlowModeReader.IsDBNull(0)) { return 0; }
+                return getServerSlowModeReader.GetInt32(0);
+            }
+
+            return 0;
+        }
     }
 }

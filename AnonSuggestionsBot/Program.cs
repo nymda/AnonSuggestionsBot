@@ -70,7 +70,7 @@ namespace AnonSuggestionsBot
             }
 
             //get the bot token from the DB
-            string token = await _db.getBotToken(true);
+            string token = await _db.getBotToken(false);
 
             //set up discord client
             _client = new DiscordSocketClient(new DiscordSocketConfig {
@@ -156,6 +156,9 @@ namespace AnonSuggestionsBot
             }
             if (command.CommandName == "suggestion-unban") {
                 await unbanSuggestionCreator(command);
+            }
+            if(command.CommandName == "suggestion-slowmode") {
+                await setServerSlowmode(command);
             }
         }
 
@@ -321,6 +324,32 @@ namespace AnonSuggestionsBot
             int userBans = await _db.getUserPreviousBans((ulong)command.GuildId, userHash);
 
             await command.RespondAsync(string.Format("The creator of `{0}` has been previously banned `{1}` time{2}", suggestion_uid, userBans, userBans == 1 ? "" : "s"));
+
+
+
+        }
+
+        private async Task setServerSlowmode(SocketSlashCommand command) {
+            if (command.GuildId == null) { return; }
+            SocketGuild guild = _client.GetGuild((ulong)command.GuildId);
+
+            SocketSlashCommandDataOption? length_option = command.Data.Options.ToArray().Where(x => x.Name == "length").FirstOrDefault();
+
+            if(length_option == null) {
+                await command.RespondAsync("Slowmode length is required");
+                return;
+            }
+
+            int length = Convert.ToInt32((double)length_option.Value);
+
+            if(length < 0) {
+                await command.RespondAsync("Slowmode length must be a positive number");
+                return;
+            }
+
+            await _db.setServerSlowMode((ulong)command.GuildId, length);
+
+            await command.RespondAsync(string.Format("Slowmode set to {0}", timeString(length, false)));
         }
 
         private async Task unbanSuggestionCreator(SocketSlashCommand command) {
@@ -426,6 +455,12 @@ namespace AnonSuggestionsBot
             suggestionUnban.AddOption("id", ApplicationCommandOptionType.String, "the UID of the suggestion");
             await guild.CreateApplicationCommandAsync(suggestionUnban.Build());
 
+            var suggestionSlowmode = new SlashCommandBuilder();
+            suggestionSlowmode.WithName("suggestion-slowmode");
+            suggestionSlowmode.WithDescription("Sets the slowmode for the server");
+            suggestionSlowmode.AddOption("length", ApplicationCommandOptionType.Number, "slowmode length in minutes");
+            await guild.CreateApplicationCommandAsync(suggestionSlowmode.Build());
+
             //posts the "create suggestion" message with the button to the input channel
             var btnBuilder = new ComponentBuilder().WithButton("Suggest", "btn-send-suggestion");
             await guild.GetTextChannel(inputChannel.Id).SendMessageAsync("Click here to submit a suggestion:", components: btnBuilder.Build());
@@ -464,6 +499,18 @@ namespace AnonSuggestionsBot
 
             //hashes the sending users ID for storage and use later
             string userHash = stringToMD5(modal.User.Id.ToString());
+
+            //checks if the user is rate limited
+            DateTime userTimeout = await _db.getUserLastSuggestionTime((ulong)guildId, userHash);
+            int serverSlowMode = await _db.getServerSlowMode((ulong)guildId);
+            DateTime userTimeoutEnd = userTimeout.AddMinutes(serverSlowMode);
+
+            if (userTimeout != DateTime.MinValue) {
+                if (DateTime.Now < userTimeoutEnd) {
+                    await modal.RespondAsync(string.Format("You are rate limited, try again in {0}", timeString((int)(userTimeoutEnd - DateTime.Now).TotalMinutes, false)), ephemeral: true);
+                    return;
+                }
+            }
 
             //checks if the sending user is banned using their hash
             int userBanned = await _db.checkUserBanned((ulong)guildId, userHash); //modal.User.Id is the user's discord ID, this is never stored

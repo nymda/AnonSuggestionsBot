@@ -88,8 +88,8 @@ namespace AnonSuggestionsBot {
             return 0;
         }
 
-        public async Task<string> getBotToken() {
-            await using var getBotToken = dataSource.CreateCommand("select bot_token from \"AnonSuggestionsBot\".config;");
+        public async Task<string> getBotToken(bool beta) {
+            await using var getBotToken = dataSource.CreateCommand(string.Format("select bot_token from \"AnonSuggestionsBot\".config where version like '{0}'", beta == false ? "LIVE" : "BETA"));
             await using var getBotTokenReader = await getBotToken.ExecuteReaderAsync();
 
             while (getBotTokenReader.Read()) {
@@ -200,6 +200,25 @@ namespace AnonSuggestionsBot {
             string query = string.Format("update \"AnonSuggestionsBot\".bans set ban_expired = true where server_id like '{0}' and user_hash like '{1}';", serverID.ToString(), userHash);
             await using var unbanUser = dataSource.CreateCommand(query);
             await unbanUser.ExecuteReaderAsync();
+        }
+
+        public async Task setServerSlowMode(ulong serverID, int slowmodeMinutes) {
+            string query = string.Format("update \"AnonSuggestionsBot\".servers set discord_slowmode = '{0}' where discord_id like '{1}';", slowmodeMinutes, serverID.ToString());
+            await using var setServerSlowMode = dataSource.CreateCommand(query);
+            await setServerSlowMode.ExecuteReaderAsync();
+        }
+
+        public async Task<DateTime> getUserLastSuggestionTime(ulong serverID, string userHash) {
+            string query = string.Format("select suggestion_uid, suggestion_time from \"AnonSuggestionsBot\".submissions where suggestion_time = (select max(suggestion_time) from \"AnonSuggestionsBot\".submissions where server_id like '{0}' and user_hash like '{1}')", serverID.ToString(), userHash);
+            await using var getUserLastSuggestionTime = dataSource.CreateCommand(query);
+            await using var getUserLastSuggestionTimeReader = await getUserLastSuggestionTime.ExecuteReaderAsync();
+
+            while (getUserLastSuggestionTimeReader.Read()) {
+                if (getUserLastSuggestionTimeReader.IsDBNull(0)) { return new DateTime(0); }
+                return getUserLastSuggestionTimeReader.GetDateTime(1);
+            }
+
+            return new DateTime(0);
         }
     }
 }

@@ -70,7 +70,7 @@ namespace AnonSuggestionsBot
             }
 
             //get the bot token from the DB
-            string token = await _db.getBotToken();
+            string token = await _db.getBotToken(true);
 
             //set up discord client
             _client = new DiscordSocketClient(new DiscordSocketConfig {
@@ -157,7 +157,6 @@ namespace AnonSuggestionsBot
             if (command.CommandName == "suggestion-unban") {
                 await unbanSuggestionCreator(command);
             }
-
         }
 
         public string timeString(int minutes, bool full) {

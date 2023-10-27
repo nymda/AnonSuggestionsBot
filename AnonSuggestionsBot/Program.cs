@@ -422,7 +422,7 @@ namespace AnonSuggestionsBot
 
             //entry for the server that /initialize was run on
 
-            await command.RespondAsync("Initializating, please wait...");
+            await command.RespondAsync("Initializing, please wait...");
 
             if (loggingChannel != null) {
                 _db.createServerEntry((ulong)command.GuildId, inputChannel.Id.ToString(), outputChannel.Id.ToString(), loggingChannel.Id.ToString());

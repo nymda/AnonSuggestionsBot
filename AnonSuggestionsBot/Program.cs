@@ -422,6 +422,8 @@ namespace AnonSuggestionsBot
 
             //entry for the server that /initialize was run on
 
+            await command.RespondAsync("Initializating, please wait...");
+
             if (loggingChannel != null) {
                 _db.createServerEntry((ulong)command.GuildId, inputChannel.Id.ToString(), outputChannel.Id.ToString(), loggingChannel.Id.ToString());
             }
@@ -463,9 +465,12 @@ namespace AnonSuggestionsBot
 
             //posts the "create suggestion" message with the button to the input channel
             var btnBuilder = new ComponentBuilder().WithButton("Suggest", "btn-send-suggestion");
-            await guild.GetTextChannel(inputChannel.Id).SendMessageAsync("Click here to submit a suggestion:", components: btnBuilder.Build());
 
-            await command.RespondAsync("Initialization complete");
+            string postMessageText = await _db.getServerPostText((ulong)command.GuildId);
+
+            await guild.GetTextChannel(inputChannel.Id).SendMessageAsync(postMessageText, components: btnBuilder.Build());
+
+            await guild.GetTextChannel((ulong)command.ChannelId).SendMessageAsync("Initialization complete.");
         }
 
         //run when the create suggestion button is clicked, shows the input box

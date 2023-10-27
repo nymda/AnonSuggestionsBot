@@ -233,5 +233,20 @@ namespace AnonSuggestionsBot {
 
             return 0;
         }
+
+        public async Task<string> getServerPostText(ulong serverID) {
+            string query = string.Format("select discord_post_text from \"AnonSuggestionsBot\".servers where discord_id like '{0}'", serverID.ToString());
+            await using var getServerPostText = dataSource.CreateCommand(query);
+            await using var getServerPostTextReader = await getServerPostText.ExecuteReaderAsync();
+
+            string def = "Click here to submit a suggestion:";
+
+            while (getServerPostTextReader.Read()) {
+                if (getServerPostTextReader.IsDBNull(0)) { return def; }
+                return getServerPostTextReader.GetString(0);
+            }
+
+            return def;
+        }
     }
 }

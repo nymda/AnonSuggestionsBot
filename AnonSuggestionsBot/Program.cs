@@ -86,7 +86,7 @@ namespace AnonSuggestionsBot
                 GatewayIntents = GatewayIntents.AllUnprivileged | GatewayIntents.MessageContent
             });
 
-            var commandService = new CommandService(new CommandServiceConfig {
+            CommandService commandService = new CommandService(new CommandServiceConfig {
                 CaseSensitiveCommands = false
             });
 
@@ -116,7 +116,7 @@ namespace AnonSuggestionsBot
             _client.SlashCommandExecuted += SlashCommandHandler;
 
             //initialize the global /initialize command
-            var initializeCmd = new SlashCommandBuilder();
+            SlashCommandBuilder initializeCmd = new SlashCommandBuilder();
             initializeCmd.WithName("initialize");
             initializeCmd.WithDescription("initializes AnonSuggestionsBot for this server");
             initializeCmd.AddOption("input", ApplicationCommandOptionType.Channel, "the channel to post the create suggestions message in");
@@ -221,10 +221,10 @@ namespace AnonSuggestionsBot
                 string title = string.Format("@{0} has banned a user from creating suggestions", command.User.Username);
                 string body = string.Format("Suggestion UID: {0}\n Suggestion time: {1} \nBan length: Permenant", suggestion_uid, bannedSuggestion[0]);
 
-                var embedNotification = new EmbedBuilder();
+                EmbedBuilder embedNotification = new EmbedBuilder();
                 embedNotification.AddField(title, body);
 
-                var embedBannedSuggestion = new EmbedBuilder();
+                EmbedBuilder embedBannedSuggestion = new EmbedBuilder();
                 embedBannedSuggestion.AddField(bannedSuggestion[1], bannedSuggestion[2]);
                 embedBannedSuggestion.WithColor(100, 31, 34);
 
@@ -288,10 +288,10 @@ namespace AnonSuggestionsBot
 
                 string body = string.Format("Suggestion UID: {0}\n Suggestion time: {1} \nBan length: {2}", suggestion_uid, bannedSuggestion[0], timeString(Convert.ToInt32((double)ban_length_option.Value), true));
 
-                var embedNotification = new EmbedBuilder();
+                EmbedBuilder embedNotification = new EmbedBuilder();
                 embedNotification.AddField(title, body);
 
-                var embedBannedSuggestion = new EmbedBuilder();
+                EmbedBuilder embedBannedSuggestion = new EmbedBuilder();
                 embedBannedSuggestion.AddField(bannedSuggestion[1], bannedSuggestion[2]);
                 embedBannedSuggestion.WithColor(100, 31, 34);
 
@@ -444,39 +444,39 @@ namespace AnonSuggestionsBot
             }
 
             //creates guild specific commands suggestion-ban and suggestion-timeout
-            var suggestionBan = new SlashCommandBuilder();
+            SlashCommandBuilder suggestionBan = new SlashCommandBuilder();
             suggestionBan.WithName("suggestion-ban");
             suggestionBan.WithDescription("Bans the creator of suggestion");
             suggestionBan.AddOption("id", ApplicationCommandOptionType.String, "the ID of the suggestion");
             await guild.CreateApplicationCommandAsync(suggestionBan.Build());
 
-            var suggestionTimeout = new SlashCommandBuilder();
+            SlashCommandBuilder suggestionTimeout = new SlashCommandBuilder();
             suggestionTimeout.WithName("suggestion-timeout");
             suggestionTimeout.WithDescription("Timeouts the creator of a suggestion");
             suggestionTimeout.AddOption("id", ApplicationCommandOptionType.String, "the UID of the suggestion");
             suggestionTimeout.AddOption("length", ApplicationCommandOptionType.Number, "timeout length in minutes");
             await guild.CreateApplicationCommandAsync(suggestionTimeout.Build());
 
-            var suggestionLookup = new SlashCommandBuilder();
+            SlashCommandBuilder suggestionLookup = new SlashCommandBuilder();
             suggestionLookup.WithName("suggestion-lookup");
             suggestionLookup.WithDescription("Returns the number of previous bans the creator of a suggestion has");
             suggestionLookup.AddOption("id", ApplicationCommandOptionType.String, "the UID of the suggestion");
             await guild.CreateApplicationCommandAsync(suggestionLookup.Build());
 
-            var suggestionUnban = new SlashCommandBuilder();
+            SlashCommandBuilder suggestionUnban = new SlashCommandBuilder();
             suggestionUnban.WithName("suggestion-unban");
             suggestionUnban.WithDescription("Unbans the creator of a suggestion");
             suggestionUnban.AddOption("id", ApplicationCommandOptionType.String, "the UID of the suggestion");
             await guild.CreateApplicationCommandAsync(suggestionUnban.Build());
 
-            var suggestionSlowmode = new SlashCommandBuilder();
+            SlashCommandBuilder suggestionSlowmode = new SlashCommandBuilder();
             suggestionSlowmode.WithName("suggestion-slowmode");
             suggestionSlowmode.WithDescription("Sets the slowmode for the server");
             suggestionSlowmode.AddOption("length", ApplicationCommandOptionType.Number, "slowmode length in minutes");
             await guild.CreateApplicationCommandAsync(suggestionSlowmode.Build());
 
             //posts the "create suggestion" message with the button to the input channel
-            var btnBuilder = new ComponentBuilder().WithButton("Suggest", "btn-send-suggestion");
+            ComponentBuilder btnBuilder = new ComponentBuilder().WithButton("Suggest", "btn-send-suggestion");
 
             string postMessageText = await _db.getServerPostText((ulong)command.GuildId);
 
@@ -488,7 +488,7 @@ namespace AnonSuggestionsBot
         //run when the create suggestion button is clicked, shows the input box
         public async Task buttonHandler(SocketMessageComponent component) {
         if(component.Data.CustomId == "btn-send-suggestion") {
-                var mb = new ModalBuilder();
+                ModalBuilder mb = new ModalBuilder();
                 mb.WithTitle("AnonSuggestionBot");
                 mb.WithCustomId("suggestion-input");
                 mb.AddTextInput("Title:", "suggestion-input-title", TextInputStyle.Short, minLength: 1, maxLength: 100, required: true);
@@ -547,7 +547,7 @@ namespace AnonSuggestionsBot
             _db.logSuggestion((ulong)guildId, userHash, suggestion_uid, title, body);
 
             //creates the embed and sends it to the output channel
-            var embed = new EmbedBuilder();
+            EmbedBuilder embed = new EmbedBuilder();
             embed.AddField(title, body);
             embed.WithFooter("Suggestion ID: " + suggestion_uid);
             RestUserMessage nmsg = await outputChannel.SendMessageAsync(embed: embed.Build());

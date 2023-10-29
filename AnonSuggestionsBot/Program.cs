@@ -71,7 +71,7 @@ namespace AnonSuggestionsBot
             }
 
             //get the bot token from the DB
-            string token = await _db.getBotToken(true);
+            string token = await _db.getBotToken(false);
 
             //set up discord client
             _client = new DiscordSocketClient(new DiscordSocketConfig {
@@ -102,11 +102,6 @@ namespace AnonSuggestionsBot
 
         private async Task LogAsync(LogMessage log) {
             Console.WriteLine(log);
-        }
-
-        private bool checkGuildId(ulong? current, ulong? guildId) {
-            if(current == guildId) { return true; }
-            else { return false; }
         }
 
         //first setup, creates the global /initialize command

@@ -43,31 +43,38 @@ namespace AnonSuggestionsBot
         private static IServiceProvider _services;
         private static Database _db = new Database();
         System.Security.Cryptography.MD5 _md5 = System.Security.Cryptography.MD5.Create();
-        public static Task Main(string[] args) => new Program().MainAsync();
+        public static Task Main(string[] args) => new Program().MainAsync(args.Length >= 2 ? args[0] : "", args.Length >= 2 ? args[1] : "");
 
         //takes an input string and returns the MD5 hash of it, this is used for user ID anonymization
         public string stringToMD5(string input) {
             return Convert.ToHexString(_md5.ComputeHash(System.Text.Encoding.ASCII.GetBytes(input)));
         }
 
-        public async Task MainAsync() {
+        public async Task MainAsync(string dbIp, string dbPw) {
             bool login = false;
 
             //login process for the postgres database, not included in github repo
-            while (!login) {
-                Console.Write("Enter postgresql IP: ");
-                string? IPAddy = Console.ReadLine();
-                Console.Write("Enter postgresql password: ");
-                string? password = Console.ReadLine();
-                Console.Clear();
 
-                if(IPAddy == null || password == null) { continue; }
+            if(dbIp != "" && dbPw != "") {
+                _db.login(dbIp, dbPw); //login to the local DB
+                login = true;
+            }
+            else {
+                while (!login) {
+                    Console.Write("Enter postgresql IP: ");
+                    string? IPAddy = Console.ReadLine();
+                    Console.Write("Enter postgresql password: ");
+                    string? password = Console.ReadLine();
+                    Console.Clear();
 
-                try {
-                    _db.login(IPAddy, password); //login to the local DB
-                    login = true;
+                    if (IPAddy == null || password == null) { continue; }
+
+                    try {
+                        _db.login(IPAddy, password); //login to the local DB
+                        login = true;
+                    }
+                    catch { }
                 }
-                catch { }
             }
 
             //get the bot token from the DB

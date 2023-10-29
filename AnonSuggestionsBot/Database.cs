@@ -118,10 +118,16 @@ namespace AnonSuggestionsBot {
             await using var logSuggestionReader = await logSuggestion.ExecuteReaderAsync();
         }
 
+        public async void setSuggestionMessageId(ulong serverID, ulong messageID, string suggestion_uid) {
+            string query = string.Format("update \"AnonSuggestionsBot\".submissions set message_id = '{0}' where server_id like '{1}' and suggestion_uid like '{2}';", messageID.ToString(), serverID.ToString(), suggestion_uid);
+            await using var setSuggestionMessageId = dataSource.CreateCommand(query);
+            await setSuggestionMessageId.ExecuteReaderAsync();
+        }
+
         public async void createBanEntry(ulong serverID, string user_hash, int length_minutes, bool perma) {
             string query = string.Format("insert into \"AnonSuggestionsBot\".bans (server_id, user_hash, ban_time, ban_duration, ban_perma) values ('{0}', '{1}', '{2}', '{3}', '{4}');", serverID.ToString(), user_hash, DateTime.Now.ToString(), length_minutes, perma);
             await using var createBanEntry = dataSource.CreateCommand(query);
-            await using var createBanEntryReader = await createBanEntry.ExecuteReaderAsync();
+            await createBanEntry.ExecuteReaderAsync();
         }
 
         public async Task<string> getUserHashFromSuggestionUID(ulong serverID, string suggestion_UID) {
@@ -168,16 +174,17 @@ namespace AnonSuggestionsBot {
         }
 
         public async Task<string[]> getSuggestionFromUid(ulong serverID, string suggestion_UID) {
-            string query = string.Format("select suggestion_time, suggestion_title, suggestion_text from \"AnonSuggestionsBot\".submissions where server_id like '{0}' and suggestion_uid like '{1}'", serverID.ToString(), suggestion_UID);
+            string query = string.Format("select suggestion_time, suggestion_title, suggestion_text, message_id from \"AnonSuggestionsBot\".submissions where server_id like '{0}' and suggestion_uid like '{1}'", serverID.ToString(), suggestion_UID);
             await using var getSuggestionFromUid = dataSource.CreateCommand(query);
             await using var getSuggestionFromUidReader = await getSuggestionFromUid.ExecuteReaderAsync();
 
-            string[] response = {"", "", ""};
+            string[] response = {"", "", "", ""};
 
             while (getSuggestionFromUidReader.Read()) {
                 response[0] = getSuggestionFromUidReader.GetDateTime(0).ToString();
                 response[1] = getSuggestionFromUidReader.GetString(1);
                 response[2] = getSuggestionFromUidReader.GetString(2);
+                response[3] = getSuggestionFromUidReader.GetString(3);
                 return response;
             }
 
@@ -196,7 +203,7 @@ namespace AnonSuggestionsBot {
             return -1;
         }
 
-        public async Task unbanUser(ulong serverID, string userHash) {
+        public async Task setBanExpired(ulong serverID, string userHash) {
             string query = string.Format("update \"AnonSuggestionsBot\".bans set ban_expired = true where server_id like '{0}' and user_hash like '{1}';", serverID.ToString(), userHash);
             await using var unbanUser = dataSource.CreateCommand(query);
             await unbanUser.ExecuteReaderAsync();

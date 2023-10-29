@@ -19,6 +19,7 @@ using Discord;
 using Discord.Commands;
 using Discord.Interactions;
 using Discord.Net;
+using Discord.Rest;
 using Discord.WebSocket;
 using Microsoft.Extensions.DependencyInjection;
 using Newtonsoft.Json;
@@ -28,8 +29,8 @@ using System.Windows.Input;
 
 /*
  * TODO:
- * global server slowmode
  * voting
+ * merge timeout / ban into one function
  * additional error handling
  * shitload of QA testing
  * DB / API optimizations
@@ -70,7 +71,7 @@ namespace AnonSuggestionsBot
             }
 
             //get the bot token from the DB
-            string token = await _db.getBotToken(false);
+            string token = await _db.getBotToken(true);
 
             //set up discord client
             _client = new DiscordSocketClient(new DiscordSocketConfig {
@@ -210,23 +211,29 @@ namespace AnonSuggestionsBot
 
             //log the ban in the logging channel if one is selected
             ulong loggingChannelId = await _db.getServerLoggingChannel((ulong)command.GuildId);
-            string[] bannedSuggestion = await _db.getSuggestionFromUid((ulong)command.GuildId, suggestion_uid);
 
-            if (loggingChannelId != 0) {
-                SocketTextChannel? loggingChannel = guild.GetTextChannel(loggingChannelId);
-                if (loggingChannel != null) {
-                    string title = string.Format("@{0} has banned a user from creating suggestions", command.User.Username);
-                    string body = string.Format("Suggestion UID: {0}\n Suggestion time: {1}, \nBan length: Permenant", suggestion_uid, bannedSuggestion[0]);
-                    var embedNotification = new EmbedBuilder();
-                    embedNotification.AddField(title, body);
+            SocketTextChannel? loggingChannel = null;
+            if (loggingChannelId != 0 && (loggingChannel = guild.GetTextChannel(loggingChannelId)) != null) {
+                string[] bannedSuggestion = await _db.getSuggestionFromUid((ulong)command.GuildId, suggestion_uid);
 
-                    var embedBannedSuggestion = new EmbedBuilder();
-                    embedBannedSuggestion.AddField(bannedSuggestion[1], bannedSuggestion[2]);
-                    embedBannedSuggestion.WithColor(100, 31, 34);
+                string title = string.Format("@{0} has banned a user from creating suggestions", command.User.Username);
+                string body = string.Format("Suggestion UID: {0}\n Suggestion time: {1} \nBan length: Permenant", suggestion_uid, bannedSuggestion[0]);
 
-                    Embed[] embedPackage = {embedNotification.Build(), embedBannedSuggestion.Build() }; 
+                var embedNotification = new EmbedBuilder();
+                embedNotification.AddField(title, body);
 
-                    await loggingChannel.SendMessageAsync(embeds: embedPackage);
+                var embedBannedSuggestion = new EmbedBuilder();
+                embedBannedSuggestion.AddField(bannedSuggestion[1], bannedSuggestion[2]);
+                embedBannedSuggestion.WithColor(100, 31, 34);
+
+                Embed[] embedPackage = { embedNotification.Build(), embedBannedSuggestion.Build() };
+                await loggingChannel.SendMessageAsync(embeds: embedPackage);
+
+                ulong bannedMessageID = ulong.Parse(bannedSuggestion[3]);
+                IMessage? bannedMessage = null;
+                ulong outputChannelId = await _db.getServerOutputChannel((ulong)command.GuildId);
+                if (bannedMessageID != 0 && (bannedMessage = await guild.GetTextChannel(outputChannelId).GetMessageAsync(bannedMessageID)) != null) {
+                    await guild.GetTextChannel(outputChannelId).DeleteMessageAsync(bannedMessage);
                 }
             }
 
@@ -270,24 +277,30 @@ namespace AnonSuggestionsBot
 
             //log the ban in the logging channel if one is selected
             ulong loggingChannelId = await _db.getServerLoggingChannel((ulong)command.GuildId);
-            string[] bannedSuggestion = await _db.getSuggestionFromUid((ulong)command.GuildId, suggestion_uid);
 
-            if (loggingChannelId != 0) {
-                SocketTextChannel? loggingChannel = guild.GetTextChannel(loggingChannelId);
-                if (loggingChannel != null) {
-                    string title = string.Format("@{0} has banned a user from creating suggestions", command.User.Username);
-                    string body = string.Format("Suggestion UID: {0}\n Suggestion time: {1}, \nBan length: {2}", suggestion_uid, bannedSuggestion[0], timeString(Convert.ToInt32((double)ban_length_option.Value), true));
+            SocketTextChannel? loggingChannel = null;
+            if (loggingChannelId != 0 && (loggingChannel = guild.GetTextChannel(loggingChannelId)) != null) {
+                string[] bannedSuggestion = await _db.getSuggestionFromUid((ulong)command.GuildId, suggestion_uid);
 
-                    var embedNotification = new EmbedBuilder();
-                    embedNotification.AddField(title, body);
+                string title = string.Format("@{0} has banned a user from creating suggestions", command.User.Username);
 
-                    var embedBannedSuggestion = new EmbedBuilder();
-                    embedBannedSuggestion.AddField(bannedSuggestion[1], bannedSuggestion[2]);
-                    embedBannedSuggestion.WithColor(100, 31, 34);
+                string body = string.Format("Suggestion UID: {0}\n Suggestion time: {1} \nBan length: {2}", suggestion_uid, bannedSuggestion[0], timeString(Convert.ToInt32((double)ban_length_option.Value), true));
 
-                    Embed[] embedPackage = { embedNotification.Build(), embedBannedSuggestion.Build() };
+                var embedNotification = new EmbedBuilder();
+                embedNotification.AddField(title, body);
 
-                    await loggingChannel.SendMessageAsync(embeds: embedPackage);
+                var embedBannedSuggestion = new EmbedBuilder();
+                embedBannedSuggestion.AddField(bannedSuggestion[1], bannedSuggestion[2]);
+                embedBannedSuggestion.WithColor(100, 31, 34);
+
+                Embed[] embedPackage = { embedNotification.Build(), embedBannedSuggestion.Build() };
+                await loggingChannel.SendMessageAsync(embeds: embedPackage);
+
+                ulong bannedMessageID = ulong.Parse(bannedSuggestion[3]);
+                IMessage? bannedMessage = null;
+                            ulong outputChannelId = await _db.getServerOutputChannel((ulong)command.GuildId);
+                if (bannedMessageID != 0 && (bannedMessage = await guild.GetTextChannel(outputChannelId).GetMessageAsync(bannedMessageID)) != null) {
+                    await guild.GetTextChannel(outputChannelId).DeleteMessageAsync(bannedMessage);
                 }
             }
 
@@ -324,9 +337,6 @@ namespace AnonSuggestionsBot
             int userBans = await _db.getUserPreviousBans((ulong)command.GuildId, userHash);
 
             await command.RespondAsync(string.Format("The creator of `{0}` has been previously banned `{1}` time{2}", suggestion_uid, userBans, userBans == 1 ? "" : "s"));
-
-
-
         }
 
         private async Task setServerSlowmode(SocketSlashCommand command) {
@@ -378,7 +388,7 @@ namespace AnonSuggestionsBot
                 return;
             }
             
-            await _db.unbanUser((ulong)command.GuildId, userHash);
+            await _db.setBanExpired((ulong)command.GuildId, userHash);
 
             await command.RespondAsync(string.Format("Bans removed for the creator of `{0}`", suggestion_uid));
         }
@@ -512,7 +522,7 @@ namespace AnonSuggestionsBot
 
             if (userTimeout != DateTime.MinValue) {
                 if (DateTime.Now < userTimeoutEnd) {
-                    await modal.RespondAsync(string.Format("You are rate limited, try again in {0}", timeString((int)(userTimeoutEnd - DateTime.Now).TotalMinutes, false)), ephemeral: true);
+                    await modal.RespondAsync(string.Format("Slow mode is enabled, try again in {0}", timeString((int)(userTimeoutEnd - DateTime.Now).TotalMinutes, false)), ephemeral: true);
                     return;
                 }
             }
@@ -538,7 +548,10 @@ namespace AnonSuggestionsBot
             var embed = new EmbedBuilder();
             embed.AddField(title, body);
             embed.WithFooter("Suggestion ID: " + suggestion_uid);
-            await outputChannel.SendMessageAsync(embed: embed.Build());
+            RestUserMessage nmsg = await outputChannel.SendMessageAsync(embed: embed.Build());
+
+            //log the message ID for if it needs to be removed later
+            _db.setSuggestionMessageId((ulong)guildId, nmsg.Id, suggestion_uid);
 
             //responds to the user with a confirmation message, only visible to the user who sent the suggestion
             await modal.RespondAsync("Suggestion sent!", ephemeral: true);

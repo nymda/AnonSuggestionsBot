@@ -46,7 +46,7 @@ namespace AnonSuggestionsBot
         System.Security.Cryptography.MD5 _md5 = System.Security.Cryptography.MD5.Create();
         public static Task Main(string[] args) => new Program().MainAsync(args.Length >= 2 ? args[0] : "", args.Length >= 2 ? args[1] : "");
 
-        public const bool USE_BETA_BOT_TOKEN = true;
+        public const bool USE_BETA_BOT_TOKEN = false;
         
         //takes an input string and returns the MD5 hash of it, this is used for user ID anonymization
         public string stringToMD5(string input) {
@@ -529,7 +529,7 @@ namespace AnonSuggestionsBot
             int serverSlowMode = await _db.getServerSlowMode((ulong)guildId);
             DateTime userTimeoutEnd = userTimeout.AddMinutes(serverSlowMode);
 
-            if (userTimeout != DateTime.MinValue) {
+            if (userTimeout != DateTime.MinValue && serverSlowMode > 0) {
                 if (DateTime.Now < userTimeoutEnd) {
                     await modal.RespondAsync(string.Format("Slow mode is enabled, try again in {0}", timeString((int)(userTimeoutEnd - DateTime.Now).TotalMinutes, false)), ephemeral: true);
                     return;

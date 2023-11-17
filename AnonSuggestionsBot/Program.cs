@@ -25,6 +25,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Newtonsoft.Json;
 using System;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Windows.Input;
 
 /*
@@ -45,6 +46,8 @@ namespace AnonSuggestionsBot
         System.Security.Cryptography.MD5 _md5 = System.Security.Cryptography.MD5.Create();
         public static Task Main(string[] args) => new Program().MainAsync(args.Length >= 2 ? args[0] : "", args.Length >= 2 ? args[1] : "");
 
+        public const bool USE_BETA_BOT_TOKEN = true;
+        
         //takes an input string and returns the MD5 hash of it, this is used for user ID anonymization
         public string stringToMD5(string input) {
             return Convert.ToHexString(_md5.ComputeHash(System.Text.Encoding.ASCII.GetBytes(input)));
@@ -78,8 +81,12 @@ namespace AnonSuggestionsBot
             }
 
             //get the bot token from the DB
-            string token = await _db.getBotToken(false);
+            string token = await _db.getBotToken(USE_BETA_BOT_TOKEN);
 
+            if (USE_BETA_BOT_TOKEN) {
+                Console.WriteLine("WARNING: USING BETA TOKEN, CHANGE BEFORE DEPLOYING");
+            }
+            
             //set up discord client
             _client = new DiscordSocketClient(new DiscordSocketConfig {
                 LogLevel = LogSeverity.Info,
@@ -492,7 +499,7 @@ namespace AnonSuggestionsBot
                 mb.WithTitle("AnonSuggestionBot");
                 mb.WithCustomId("suggestion-input");
                 mb.AddTextInput("Title:", "suggestion-input-title", TextInputStyle.Short, minLength: 1, maxLength: 100, required: true);
-                mb.AddTextInput("Suggestion:", "suggestion-input-body", TextInputStyle.Paragraph, minLength: 1, maxLength: 2000, required: true);
+                mb.AddTextInput("Suggestion:", "suggestion-input-body", TextInputStyle.Paragraph, minLength: 1, maxLength: 1000, required: true);
                 await component.RespondWithModalAsync(mb.Build());
             }
         }
@@ -545,6 +552,24 @@ namespace AnonSuggestionsBot
 
             //logs the suggestion in the DB, only storing the users hash
             _db.logSuggestion((ulong)guildId, userHash, suggestion_uid, title, body);
+
+            //List<string> charLimitSplits = new List<String> { };
+            //for(int i = 0; i < body.Length; i += 1000) {
+            //    charLimitSplits.Add(body.Substring(i, Math.Min(1000, body.Length - i)));
+            //}
+
+            //List<Embed> embeds = new List<Embed> { };
+
+            //for(int i = 0; i < charLimitSplits.Count(); i++) {
+            //    var emb = new EmbedBuilder();
+            //    emb.AddField(i == 0 ? title : "...", charLimitSplits[i]);
+
+            //    if (i == charLimitSplits.Count() - 1) {
+            //        emb.WithFooter(string.Format("Suggestion ID: {0}", suggestion_uid));
+            //    }
+
+            //    embeds.Add(emb.Build());
+            //}
 
             //creates the embed and sends it to the output channel
             EmbedBuilder embed = new EmbedBuilder();

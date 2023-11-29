@@ -46,7 +46,7 @@ namespace AnonSuggestionsBot
         System.Security.Cryptography.MD5 _md5 = System.Security.Cryptography.MD5.Create();
         public static Task Main(string[] args) => new Program().MainAsync(args.Length >= 2 ? args[0] : "", args.Length >= 2 ? args[1] : "");
 
-        public const bool USE_BETA_BOT_TOKEN = true;
+        public const bool USE_BETA_BOT_TOKEN = false;
         
         //takes an input string and returns the MD5 hash of it, this is used for user ID anonymization
         public string stringToMD5(string input) {
@@ -107,7 +107,8 @@ namespace AnonSuggestionsBot
             _client.Ready += ReadyAsync;
             _client.ButtonExecuted += buttonHandler;
             _client.ModalSubmitted += modalResponseHandler;
-
+            _client.SlashCommandExecuted += SlashCommandHandler;
+            
             await _client.LoginAsync(TokenType.Bot, token);
             await _client.StartAsync();
 
@@ -120,8 +121,6 @@ namespace AnonSuggestionsBot
 
         //first setup, creates the global /initialize command
         private async Task ReadyAsync() {
-            _client.SlashCommandExecuted += SlashCommandHandler;
-
             //initialize the global /initialize command
             var initializeCmd = new SlashCommandBuilder();
             initializeCmd.WithName("initialize");

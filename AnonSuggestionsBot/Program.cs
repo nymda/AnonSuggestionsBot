@@ -24,9 +24,13 @@ using Discord.WebSocket;
 using Microsoft.Extensions.DependencyInjection;
 using Newtonsoft.Json;
 using System;
+using System.ComponentModel;
 using System.Reflection;
+using System.Reflection.Emit;
 using System.Runtime.ExceptionServices;
+using System.Security.Cryptography.X509Certificates;
 using System.Windows.Input;
+using static AnonSuggestionsBot.Database;
 
 /*
  * TODO:
@@ -39,6 +43,45 @@ using System.Windows.Input;
 
 namespace AnonSuggestionsBot
 {
+    public struct pollOption {
+        public int ID;
+        public string text;
+        public string button;
+    }
+
+    public struct pollDataPackage {
+        public ulong guildId = 0;
+        public string title = "";
+        public string userHash = "";
+        public string pollUid = "";
+            
+        public List<pollOption> options = new List<pollOption> { };
+
+        public string buttonUidResults = "";
+        public string buttonUidEnd = "";
+
+        public pollDataPackage() { }
+    }
+
+    public struct pollResultsPackage {
+        public int countA = 0;
+        public int countB = 0;
+        public int countC = 0;
+        public int countD = 0;
+
+        public pollResultsPackage() { }
+    }
+    
+    public enum pollButtonIds {
+        INVALID = -1,
+        A = 0,
+        B = 1,
+        C = 2,
+        D = 3,
+        RESULTS = 10,
+        END = 11
+    }
+    
     internal class Program {
         private static DiscordSocketClient _client;
         private static IServiceProvider _services;
@@ -55,10 +98,9 @@ namespace AnonSuggestionsBot
 
         public async Task MainAsync(string dbIp, string dbPw) {
             bool login = false;
-
             //login process for the postgres database, not included in github repo
 
-            if(dbIp != "" && dbPw != "") {
+            if (dbIp != "" && dbPw != "") {
                 _db.login(dbIp, dbPw); //login to the local DB
                 login = true;
             }
@@ -169,6 +211,9 @@ namespace AnonSuggestionsBot
             if(command.CommandName == "suggestion-slowmode") {
                 await setServerSlowmode(command);
             }
+            if(command.CommandName == "anon-poll") {
+                await createNewAnonVote(command);
+            }
         }
 
         public string timeString(int minutes, bool full) {
@@ -202,7 +247,7 @@ namespace AnonSuggestionsBot
             string? suggestion_uid = suggestion_uid_option.Value.ToString();
 
             if (suggestion_uid == null) {
-                await command.RespondAsync("Suggestion UID and ban length are required");
+                await command.RespondAsync("Suggestion UID is required");
                 return;
             }
 
@@ -215,7 +260,7 @@ namespace AnonSuggestionsBot
             }
 
             //creates a ban entry using the retrieved user hash
-            _db.createBanEntry((ulong)command.GuildId, userHash, 0, true);
+            _db.createBanEntry((ulong)command.GuildId, userHash, suggestion_uid, 0, true);
 
             //log the ban in the logging channel if one is selected
             ulong loggingChannelId = await _db.getServerLoggingChannel((ulong)command.GuildId);
@@ -274,14 +319,14 @@ namespace AnonSuggestionsBot
 
             //gets the hashed UID of the user who created the suggestion
             string userHash = await _db.getUserHashFromSuggestionUID((ulong)command.GuildId, suggestion_uid);
-
+            
             if (userHash == "") {
                 await command.RespondAsync("Suggestion UID not found");
                 return;
             }
 
             //creates a ban entry using the retrieved user hash, but its temporary
-            _db.createBanEntry((ulong)command.GuildId, userHash, Convert.ToInt32((double)ban_length_option.Value), false);
+            _db.createBanEntry((ulong)command.GuildId, userHash, suggestion_uid, Convert.ToInt32((double)ban_length_option.Value), false);
 
             //log the ban in the logging channel if one is selected
             ulong loggingChannelId = await _db.getServerLoggingChannel((ulong)command.GuildId);
@@ -342,9 +387,9 @@ namespace AnonSuggestionsBot
             }
 
             //creates a ban entry using the retrieved user hash
-            int userBans = await _db.getUserPreviousBans((ulong)command.GuildId, userHash);
+            int[] userBans = await _db.getUserPreviousBans((ulong)command.GuildId, userHash);
 
-            await command.RespondAsync(string.Format("The creator of `{0}` has been previously banned `{1}` time{2}", suggestion_uid, userBans, userBans == 1 ? "" : "s"));
+            await command.RespondAsync(string.Format("The creator of `{0}` has `{1}` ban{2} from `{3}` suggestion{4}", suggestion_uid, userBans[0], userBans[0] == 1 ? "" : "s", userBans[1], userBans[1] == 1 ? "" : "s"));
         }
 
         private async Task setServerSlowmode(SocketSlashCommand command) {
@@ -400,7 +445,7 @@ namespace AnonSuggestionsBot
 
             await command.RespondAsync(string.Format("Bans removed for the creator of `{0}`", suggestion_uid));
         }
-
+        
         private async Task guildSetup(SocketSlashCommand command) {
             if(command.GuildId == null) { return; }
             SocketGuild guild = _client.GetGuild((ulong)command.GuildId);
@@ -481,6 +526,11 @@ namespace AnonSuggestionsBot
             suggestionSlowmode.AddOption("length", ApplicationCommandOptionType.Number, "slowmode length in minutes");
             await guild.CreateApplicationCommandAsync(suggestionSlowmode.Build());
 
+            SlashCommandBuilder createAnonPoll = new SlashCommandBuilder();
+            createAnonPoll.WithName("anon-poll");
+            createAnonPoll.WithDescription("Creates a new anonymous poll");
+            await guild.CreateApplicationCommandAsync(createAnonPoll.Build());
+
             //posts the "create suggestion" message with the button to the input channel
             ComponentBuilder btnBuilder = new ComponentBuilder().WithButton("Suggest", "btn-send-suggestion");
 
@@ -491,29 +541,121 @@ namespace AnonSuggestionsBot
             await guild.GetTextChannel((ulong)command.ChannelId).SendMessageAsync("Initialization complete.");
         }
 
+        public string renderProgressBar(int total, float percentage, int length) {
+            int squaresFilled = (int)(percentage * length);
+            int squaresEmpty = length - squaresFilled;
+            string response = "";
+            response += string.Format("[{0}]", total.ToString("0000"));
+            response += string.Format("[{0}{1}]", new string('#', squaresFilled), new string(' ', squaresEmpty));
+            response += string.Format("[{0}%]", (percentage * 100f).ToString("000"));
+            return response;
+        }
+
+        public async Task handlePollButtonPress(SocketMessageComponent component) {
+            if (component.GuildId == null) { return; }
+            pollButtonResponse pbr = await _db.getClickedPollButton((ulong)component.GuildId, component.Data.CustomId);
+            if(pbr.option_num == -1) {
+                await component.RespondAsync("Internal error, invalid button ID or null response"); 
+                return; 
+            }
+
+            if(pbr.option_num < 10) {
+                string userHash = stringToMD5(component.User.Id.ToString());
+                if (await _db.hasUserVotedOnPoll((ulong)component.GuildId, pbr.poll_uid, userHash)) {
+                    await component.RespondAsync("You have already voted on this poll", ephemeral: true);
+                    return;
+                }
+
+                _db.voteOnPoll((ulong)component.GuildId, pbr.poll_uid, userHash, pbr.option_num);
+
+                await component.RespondAsync("Vote counted, thanks!", ephemeral: true);
+            }
+            else if(pbr.option_num == 10) { //results
+                int[] pollUsedOptions = await _db.getValidPollOptions((ulong)component.GuildId, pbr.poll_uid);
+                pollResultsPackage PRP = await _db.getPollResults((ulong)component.GuildId, pbr.poll_uid);
+                string pollTitle = await _db.getPollTitle((ulong)component.GuildId, pbr.poll_uid);
+                string body = "```";
+
+                int totalVotes = PRP.countA + PRP.countB + PRP.countC + PRP.countD;
+                float percentA = (float)PRP.countA / (float)totalVotes;
+                float percentB = (float)PRP.countB / (float)totalVotes;
+                float percentC = (float)PRP.countC / (float)totalVotes;
+                float percentD = (float)PRP.countD / (float)totalVotes;
+
+                foreach (int i in pollUsedOptions) {
+                    switch (i) {
+                        case 0:
+                            body += "A: " + renderProgressBar(PRP.countA, percentA, 25) + "\n";
+                            break;
+                        case 1:
+                            body += "B: " + renderProgressBar(PRP.countB, percentB, 25) + "\n";
+                            break;
+                        case 2:
+                            body += "C: " + renderProgressBar(PRP.countC, percentC, 25) + "\n";
+                            break;
+                        case 3:
+                            body += "D: " + renderProgressBar(PRP.countD, percentD, 25) + "\n";
+                            break;
+                    }
+                }
+
+                body += "```";
+                
+                EmbedBuilder embedNotification = new EmbedBuilder();
+                embedNotification.AddField(pollTitle + " | Current results", body);
+                embedNotification.WithFooter("Total votes: " + totalVotes);
+                
+                await component.RespondAsync(embed: embedNotification.Build(), ephemeral: true);
+            }
+            else if (pbr.option_num == 11) { //end
+
+            }
+
+        }
+        
         //run when the create suggestion button is clicked, shows the input box
         public async Task buttonHandler(SocketMessageComponent component) {
-        if(component.Data.CustomId == "btn-send-suggestion") {
+            if(component.Data.CustomId == "btn-send-suggestion") {
                 ModalBuilder mb = new ModalBuilder();
                 mb.WithTitle("AnonSuggestionBot");
-                mb.WithCustomId("suggestion-input");
-                mb.AddTextInput("Title:", "suggestion-input-title", TextInputStyle.Short, minLength: 1, maxLength: 100, required: true);
-                mb.AddTextInput("Suggestion:", "suggestion-input-body", TextInputStyle.Paragraph, minLength: 1, maxLength: 1000, required: true);
+                mb.WithCustomId("modal-suggestion");
+                mb.AddTextInput("Title:", "modal-suggestion-title", TextInputStyle.Short, minLength: 1, maxLength: 100, required: true);
+                mb.AddTextInput("Suggestion:", "modal-suggestion-body", TextInputStyle.Paragraph, minLength: 1, maxLength: 1000, required: true);
                 await component.RespondWithModalAsync(mb.Build());
             }
+            else if (component.Data.CustomId.StartsWith("PC_")) {
+                //poll button
+                await handlePollButtonPress(component);
+            }
+        }
+
+        public async Task createNewAnonVote(SocketSlashCommand command) {
+            ModalBuilder mb = new ModalBuilder();
+            mb.WithTitle("AnonSuggestionBot - Anonymous poll");
+            mb.WithCustomId("modal-poll");
+            mb.AddTextInput("Title:", "poll-input-title", TextInputStyle.Short, minLength: 1, maxLength: 100, required: true);
+            mb.AddTextInput("Option 1:", "poll-input-A", TextInputStyle.Short, minLength: 1, maxLength: 100, required: true);
+            mb.AddTextInput("Option 2:", "poll-input-B", TextInputStyle.Short, minLength: 1, maxLength: 100, required: true);
+            mb.AddTextInput("Option 3:", "poll-input-C", TextInputStyle.Short, minLength: 1, maxLength: 100, required: false);
+            mb.AddTextInput("Option 4:", "poll-input-D", TextInputStyle.Short, minLength: 1, maxLength: 100, required: false);
+            await command.RespondWithModalAsync(mb.Build());
         }
 
         public string createUid() {
             return Guid.NewGuid().ToString();
         }
 
+        public string createShortUid() {
+            return Guid.NewGuid().ToString().Split("-")[0];
+        }
+
         //handles actually sending a suggestion
-        public async Task modalResponseHandler(SocketModal modal) {
+        public async Task postAnonSuggestion(SocketModal modal) {
             ulong? guildId = modal.GuildId;
-            if(guildId == null) { return; }
+            if (guildId == null) { return; }
             SocketGuild guild = _client.GetGuild((ulong)guildId);
-            string title = modal.Data.Components.First(x => x.CustomId == "suggestion-input-title").Value;
-            string body = modal.Data.Components.First(x => x.CustomId == "suggestion-input-body").Value;
+            string title = modal.Data.Components.First(x => x.CustomId == "modal-suggestion-title").Value;
+            string body = modal.Data.Components.First(x => x.CustomId == "modal-suggestion-body").Value;
 
             //gets the output channel for the current server
             ulong outputChannelId = await _db.getServerOutputChannel((ulong)guildId);
@@ -537,11 +679,11 @@ namespace AnonSuggestionsBot
 
             //checks if the sending user is banned using their hash
             int userBanned = await _db.checkUserBanned((ulong)guildId, userHash); //modal.User.Id is the user's discord ID, this is never stored
-            if(userBanned > 0) {
+            if (userBanned > 0) {
                 await modal.RespondAsync(string.Format("You are banned from creating suggestions, try again in {0}", timeString(userBanned, false)), ephemeral: true);
                 return;
             }
-            else if(userBanned == -2) {
+            else if (userBanned == -2) {
                 await modal.RespondAsync("You are permanently banned from creating suggestions", ephemeral: true);
                 return;
             }
@@ -551,24 +693,6 @@ namespace AnonSuggestionsBot
 
             //logs the suggestion in the DB, only storing the users hash
             _db.logSuggestion((ulong)guildId, userHash, suggestion_uid, title, body);
-
-            //List<string> charLimitSplits = new List<String> { };
-            //for(int i = 0; i < body.Length; i += 1000) {
-            //    charLimitSplits.Add(body.Substring(i, Math.Min(1000, body.Length - i)));
-            //}
-
-            //List<Embed> embeds = new List<Embed> { };
-
-            //for(int i = 0; i < charLimitSplits.Count(); i++) {
-            //    var emb = new EmbedBuilder();
-            //    emb.AddField(i == 0 ? title : "...", charLimitSplits[i]);
-
-            //    if (i == charLimitSplits.Count() - 1) {
-            //        emb.WithFooter(string.Format("Suggestion ID: {0}", suggestion_uid));
-            //    }
-
-            //    embeds.Add(emb.Build());
-            //}
 
             //creates the embed and sends it to the output channel
             EmbedBuilder embed = new EmbedBuilder();
@@ -581,6 +705,79 @@ namespace AnonSuggestionsBot
 
             //responds to the user with a confirmation message, only visible to the user who sent the suggestion
             await modal.RespondAsync("Suggestion sent!", ephemeral: true);
+        }
+
+        public async Task postAnonPoll(SocketModal modal) {            
+            ulong? guildId = modal.GuildId;
+            if (guildId == null) { return; }
+            SocketGuild guild = _client.GetGuild((ulong)guildId);
+            string title = modal.Data.Components.First(x => x.CustomId == "poll-input-title").Value;
+            SocketMessageComponentData? A = modal.Data.Components.FirstOrDefault(x => x.CustomId == "poll-input-A");
+            SocketMessageComponentData? B = modal.Data.Components.FirstOrDefault(x => x.CustomId == "poll-input-B");
+            SocketMessageComponentData? C = modal.Data.Components.FirstOrDefault(x => x.CustomId == "poll-input-C");
+            SocketMessageComponentData? D = modal.Data.Components.FirstOrDefault(x => x.CustomId == "poll-input-D");
+
+            if (A == null || B == null) { return; }
+
+            string[] options = new string[4];
+            options[0] = A.Value;
+            options[1] = B.Value;
+            if (C != null) { options[2] = C.Value; }
+            if (D != null) { options[3] = D.Value; }
+
+            string poll_uid = createUid();
+            string userHash = stringToMD5(modal.User.Id.ToString());
+
+            string body = "```";
+            string[] optionLetters = { "A", "B", "C", "D" };
+            ComponentBuilder btnBuilder = new ComponentBuilder();
+
+            pollDataPackage PDP = new pollDataPackage {
+                title = title,
+                userHash = userHash,
+                guildId = (ulong)guildId,
+                pollUid = poll_uid
+            };
+
+            for (int i = 0; i < 4; i++) {
+                if (options[i] == "") { continue; }
+                string thisButtonnId = "PC_" + createShortUid();
+                string thisOptionLetter = optionLetters[i];
+                string thisOptionText = options[i];
+                PDP.options.Add(new pollOption() { ID = i, text = thisOptionText, button = thisButtonnId });
+                body += string.Format("{0}: {1}\n", thisOptionLetter, thisOptionText);
+                btnBuilder.WithButton(thisOptionLetter, thisButtonnId);
+            }
+
+            string resultsBtnUID = "PC_" + createShortUid();
+            btnBuilder.WithButton("Results", resultsBtnUID, row: 1, style: ButtonStyle.Success);
+            string endBtnUID = "PC_" + createShortUid();
+            btnBuilder.WithButton("End", endBtnUID, row: 1, style: ButtonStyle.Danger);
+
+            PDP.buttonUidResults = resultsBtnUID;
+            PDP.buttonUidEnd = endBtnUID;
+
+            await _db.createNewPoll(PDP);
+
+            EmbedBuilder embedNotification = new EmbedBuilder();
+            embedNotification.AddField(title, body + "```");
+            embedNotification.WithFooter("Poll ID: " + poll_uid);
+
+            RestUserMessage nmsg = await modal.Channel.SendMessageAsync(embed: embedNotification.Build(), components: btnBuilder.Build());
+
+            _db.setPollMessageId((ulong)guildId, poll_uid, nmsg.Id);
+
+            await modal.RespondAsync("Poll created!", ephemeral: true);
+        }
+        
+        public async Task modalResponseHandler(SocketModal modal) {
+
+            if (modal.Data.CustomId == "modal-suggestion") {
+                await postAnonSuggestion(modal);
+            }
+            else if(modal.Data.CustomId == "modal-poll") {
+                await postAnonPoll(modal);
+            }         
         }
     }
 }

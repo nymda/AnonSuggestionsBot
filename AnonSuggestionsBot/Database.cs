@@ -29,8 +29,14 @@ namespace AnonSuggestionsBot {
 
         private NpgsqlDataSource dataSource;
 
+        public struct pollButtonResponse {
+            public string poll_uid;
+            public int option_num;
+            public string serverID;
+        }
+        
         public async void login(string IP, string password) {
-            var connectionString = string.Format("Host={0};Username=postgres;Password={1};Database=postgres", IP, password);
+            var connectionString = string.Format("Host={0};Username=postgres;Password={1};Database=postgres;Keepalive=1", IP, password);
             dataSource = NpgsqlDataSource.Create(connectionString);
         }
 
@@ -58,8 +64,8 @@ namespace AnonSuggestionsBot {
             }
         }
 
-        public async Task updateBans(ulong serverID) {
-            string query = string.Format("update \"AnonSuggestionsBot\".bans set ban_expired = true where server_id like '{0}' and not (ban_time + (ban_duration * interval '1 minute')) >= now();", serverID.ToString());
+        private async Task i_updateBans(ulong serverID) {
+            string query = string.Format("update \"AnonSuggestionsBot\".bans set ban_expired = true where server_id like '{0}' and ban_perma = false and not (ban_time + (ban_duration * interval '1 minute')) >= now();", serverID.ToString());
             await using var updateBans = dataSource.CreateCommand(query);
             await updateBans.ExecuteReaderAsync();
         }
@@ -124,8 +130,8 @@ namespace AnonSuggestionsBot {
             await setSuggestionMessageId.ExecuteReaderAsync();
         }
 
-        public async void createBanEntry(ulong serverID, string user_hash, int length_minutes, bool perma) {
-            string query = string.Format("insert into \"AnonSuggestionsBot\".bans (server_id, user_hash, ban_time, ban_duration, ban_perma) values ('{0}', '{1}', '{2}', '{3}', '{4}');", serverID.ToString(), user_hash, DateTime.Now.ToString(), length_minutes, perma);
+        public async void createBanEntry(ulong serverID, string user_hash, string suggestion_UID, int length_minutes, bool perma) {
+            string query = string.Format("insert into \"AnonSuggestionsBot\".bans (server_id, user_hash, ban_time, ban_suggestion, ban_duration, ban_perma) values ('{0}', '{1}', '{2}', '{3}', '{4}', '{5}');", serverID.ToString(), user_hash, DateTime.Now.ToString(), suggestion_UID, length_minutes, perma);
             await using var createBanEntry = dataSource.CreateCommand(query);
             await createBanEntry.ExecuteReaderAsync();
         }
@@ -141,10 +147,10 @@ namespace AnonSuggestionsBot {
             return "";
         }
 
-        public async Task<int> checkUserBanned(ulong serverID, string userHash) {
-            await updateBans(serverID);
+        public async Task<int> checkUserBanned(ulong serverID, string user_hash) {
+            await i_updateBans(serverID);
 
-            string query = string.Format("select * from \"AnonSuggestionsBot\".bans where server_id like '{0}' and user_hash like '{1}' and (ban_expired != true);", serverID.ToString(), userHash);
+            string query = string.Format("select * from \"AnonSuggestionsBot\".bans where server_id like '{0}' and user_hash like '{1}' and (ban_expired != true);", serverID.ToString(), user_hash);
             await using var checkUserBanned = dataSource.CreateCommand(query);
             await using var checkUserBannedReader = await checkUserBanned.ExecuteReaderAsync();
 
@@ -154,9 +160,9 @@ namespace AnonSuggestionsBot {
             bool banned = false;
 
             while (checkUserBannedReader.Read()) {
-                DateTime banTime = checkUserBannedReader.GetDateTime(3);
-                int banDuration = checkUserBannedReader.GetInt32(4);
-                bool banPerma = checkUserBannedReader.GetBoolean(5);
+                DateTime banTime = checkUserBannedReader.GetDateTime(4);
+                int banDuration = checkUserBannedReader.GetInt32(5);
+                bool banPerma = checkUserBannedReader.GetBoolean(6);
 
                 DateTime banTimePlusDuration = banTime.AddMinutes(banDuration);
 
@@ -191,16 +197,19 @@ namespace AnonSuggestionsBot {
             return response;
         }
 
-        public async Task<int> getUserPreviousBans(ulong serverID, string userHash) { 
-            string query = string.Format("select count(user_hash) from \"AnonSuggestionsBot\".bans where server_id like '{0}' and user_hash like '{1}';", serverID.ToString(), userHash);
+        public async Task<int[]> getUserPreviousBans(ulong serverID, string user_hash) { 
+            string query = string.Format("select count(user_hash) as total, count(distinct ban_suggestion) as dist from \"AnonSuggestionsBot\".bans where server_id like '{0}' and user_hash like '{1}';", serverID.ToString(), user_hash);
             await using var getUserPreviousBans = dataSource.CreateCommand(query);
             await using var getUserPreviousBansReader = await getUserPreviousBans.ExecuteReaderAsync();
 
+            int[] response = { -1, -1 };
+            
             while (getUserPreviousBansReader.Read()) {
-                return getUserPreviousBansReader.GetInt32(0);
+                response[0] = getUserPreviousBansReader.GetInt32(0);
+                response[1] = getUserPreviousBansReader.GetInt32(1);
             }
 
-            return -1;
+            return response;
         }
 
         public async Task setBanExpired(ulong serverID, string userHash) {
@@ -215,8 +224,8 @@ namespace AnonSuggestionsBot {
             await setServerSlowMode.ExecuteReaderAsync();
         }
 
-        public async Task<DateTime> getUserLastSuggestionTime(ulong serverID, string userHash) {
-            string query = string.Format("select suggestion_uid, suggestion_time from \"AnonSuggestionsBot\".submissions where suggestion_time = (select max(suggestion_time) from \"AnonSuggestionsBot\".submissions where server_id like '{0}' and user_hash like '{1}')", serverID.ToString(), userHash);
+        public async Task<DateTime> getUserLastSuggestionTime(ulong serverID, string user_hash) {
+            string query = string.Format("select suggestion_uid, suggestion_time from \"AnonSuggestionsBot\".submissions where suggestion_time = (select max(suggestion_time) from \"AnonSuggestionsBot\".submissions where server_id like '{0}' and user_hash like '{1}')", serverID.ToString(), user_hash);
             await using var getUserLastSuggestionTime = dataSource.CreateCommand(query);
             await using var getUserLastSuggestionTimeReader = await getUserLastSuggestionTime.ExecuteReaderAsync();
 
@@ -255,5 +264,133 @@ namespace AnonSuggestionsBot {
 
             return def;
         }
+
+        public async Task<string> getPollTitle(ulong serverID, string poll_uid) {
+            string query = string.Format("select poll_title from \"AnonSuggestionsBot\".POLLS P where server_id like '{0}' and poll_uid like '{1}'", serverID.ToString(), poll_uid);
+            await using var getPollTitle = dataSource.CreateCommand(query);
+            await using var getPollTitleReader = await getPollTitle.ExecuteReaderAsync();
+
+            string def = "Poll";
+
+            while (getPollTitleReader.Read()) {
+                if (getPollTitleReader.IsDBNull(0)) { return def; }
+                return getPollTitleReader.GetString(0);
+            }
+
+            return def;
+        }
+
+        private async Task<bool> i_addPollOption(string poll_uid, string option, string button_uid, int option_index) {
+            string query = string.Format("insert into \"AnonSuggestionsBot\".poll_options (poll_uid, option_num, option_text, button_uid) values ('{0}', '{1}', '{2}', '{3}')", poll_uid, option_index, option, button_uid);
+            await using var addPollOption = dataSource.CreateCommand(query);
+            await addPollOption.ExecuteReaderAsync();
+            return true;
+        }
+
+        public async Task<bool> createNewPoll(pollDataPackage PDP) {
+            if (PDP.options.Count() < 2) { return false; }
+
+            string query = string.Format("insert into \"AnonSuggestionsBot\".polls (server_id, user_hash, poll_uid, poll_title) values ('{0}', '{1}', '{2}', '{3}')", PDP.guildId.ToString(), PDP.userHash, PDP.pollUid, PDP.title);
+            await using var createNewPoll = dataSource.CreateCommand(query);
+            await createNewPoll.ExecuteReaderAsync();
+
+            foreach(pollOption po in PDP.options) {
+                await i_addPollOption(PDP.pollUid, po.text, po.button, po.ID);
+            }
+
+            await i_addPollOption(PDP.pollUid, "RESULTS", PDP.buttonUidResults, 10);
+            await i_addPollOption(PDP.pollUid, "END", PDP.buttonUidEnd, 11);
+            
+            return true;
+        }
+
+        public async void setPollMessageId(ulong serverID, string poll_uid, ulong message_id) {
+            string query = string.Format("update \"AnonSuggestionsBot\".POLLS set message_id = '{0}' where server_id like '{1}' and poll_uid like '{2}'", message_id.ToString(), serverID.ToString(), poll_uid);
+            await using var updatePollMessageId = dataSource.CreateCommand(query);
+            await updatePollMessageId.ExecuteReaderAsync();
+        }
+
+        public async Task<pollButtonResponse> getClickedPollButton(ulong serverID, string button_uid) {
+            string query = string.Format("select \"AnonSuggestionsBot\".POLL_OPTIONS.poll_uid, \"AnonSuggestionsBot\".POLL_OPTIONS.option_num, \"AnonSuggestionsBot\".POLLS.server_id from \"AnonSuggestionsBot\".POLL_OPTIONS inner join \"AnonSuggestionsBot\".POLLS on POLL_OPTIONS.poll_uid like POLLS.poll_uid\r\nwhere \"AnonSuggestionsBot\".POLLS.server_id like '{0}' and \"AnonSuggestionsBot\".POLL_OPTIONS.button_uid like '{1}';", serverID.ToString(), button_uid);
+            await using var getClickedPollButton = dataSource.CreateCommand(query);
+            await using var getClickedPollButtonReader = await getClickedPollButton.ExecuteReaderAsync();
+
+            pollButtonResponse response = new pollButtonResponse();
+            response.poll_uid = "";
+            response.option_num = -1;
+
+            while (getClickedPollButtonReader.Read()) {
+                if (getClickedPollButtonReader.IsDBNull(0)) { return response; }
+                response.poll_uid = getClickedPollButtonReader.GetString(0);
+                response.option_num = getClickedPollButtonReader.GetInt32(1);
+                response.serverID = getClickedPollButtonReader.GetString(2);
+            }
+
+            return response;
+        }
+
+        public async Task<bool> hasUserVotedOnPoll(ulong serverID, string poll_uid, string user_hash) {
+            string query = string.Format("select \"AnonSuggestionsBot\".POLL_VOTE.vote_pk from \"AnonSuggestionsBot\".POLL_VOTE inner join \"AnonSuggestionsBot\".POLLS on POLL_VOTE.poll_uid like POLLS.poll_uid where \"AnonSuggestionsBot\".POLLS.server_id like '{0}' and \"AnonSuggestionsBot\".POLL_VOTE.user_hash like '{1}' and \"AnonSuggestionsBot\".POLL_VOTE.poll_uid like '{2}';", serverID.ToString(), user_hash, poll_uid);
+            await using var hasUserVotedOnPoll = dataSource.CreateCommand(query);
+            await using var hasUserVotedOnPollReader = await hasUserVotedOnPoll.ExecuteReaderAsync();
+            while (hasUserVotedOnPollReader.Read()) {
+                if (hasUserVotedOnPollReader.IsDBNull(0)) { return false; }
+                return true;
+            }
+            return false;
+        }
+
+        public async void voteOnPoll(ulong serverID, string poll_uid, string user_hash, int option) {
+            string query = string.Format("insert into \"AnonSuggestionsBot\".POLL_VOTE (poll_uid, user_hash, option_num) values ('{0}', '{1}', '{2}');", poll_uid, user_hash, option);
+            await using var voteOnPoll = dataSource.CreateCommand(query);
+            await voteOnPoll.ExecuteReaderAsync();
+        }
+        
+        public async Task<int[]> getValidPollOptions(ulong serverID, string poll_uid) {
+            string query = string.Format("select \"AnonSuggestionsBot\".POLL_OPTIONS.option_num from \"AnonSuggestionsBot\".POLL_OPTIONS\r\ninner join \"AnonSuggestionsBot\".POLLS on POLL_OPTIONS.poll_uid like POLLS.poll_uid where \"AnonSuggestionsBot\".POLLS.server_id like '{0}' and \"AnonSuggestionsBot\".POLL_OPTIONS.poll_uid like '{1}' and \"AnonSuggestionsBot\".POLL_OPTIONS.option_num not in (10, 11);", serverID.ToString(), poll_uid);
+            await using var getValidPollOptions = dataSource.CreateCommand(query);
+            await using var getValidPollOptionsReader = await getValidPollOptions.ExecuteReaderAsync();
+
+            List<int> validOptions = new List<int>();
+
+            while (getValidPollOptionsReader.Read()) {
+                if (getValidPollOptionsReader.IsDBNull(0)) { return validOptions.ToArray(); }
+                validOptions.Add(getValidPollOptionsReader.GetInt32(0));
+            }
+
+            return validOptions.ToArray();
+        }
+        
+        public async Task<pollResultsPackage> getPollResults(ulong serverID, string poll_uid) {
+            pollResultsPackage PRP = new pollResultsPackage();
+            string query = string.Format("select \"AnonSuggestionsBot\".POLL_VOTE.option_num, count(\"AnonSuggestionsBot\".POLL_VOTE.option_num) as cnt from \"AnonSuggestionsBot\".POLL_VOTE\r\ninner join \"AnonSuggestionsBot\".POLLS on POLL_VOTE.poll_uid like POLLS.poll_uid where \"AnonSuggestionsBot\".POLLS.server_id like '{0}' and \"AnonSuggestionsBot\".POLL_VOTE.poll_uid like '{1}' group by option_num;", serverID.ToString(), poll_uid);
+            await using var getPollResults = dataSource.CreateCommand(query);
+            await using var getPollResultsReader = await getPollResults.ExecuteReaderAsync();
+
+            while (getPollResultsReader.Read()) {
+                int ID = getPollResultsReader.GetInt32(0);
+                int COUNT = getPollResultsReader.GetInt32(1);
+                switch (ID) {
+                    case 0:
+                        PRP.countA = COUNT;
+                        break;
+                    case 1:
+                        PRP.countB = COUNT;
+                        break;
+                    case 2:
+                        PRP.countC = COUNT;
+                        break;
+                    case 3:
+                        PRP.countD = COUNT;
+                        break;
+                }
+            }
+
+            return PRP;
+        }
+
+        //public async Task<bool> closePoll(ulong serverID, string user_hash, string poll_uid) {
+
+        //}
     }
 }
